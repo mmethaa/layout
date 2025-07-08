@@ -21,16 +21,17 @@ st.markdown("""
         border-radius: 10px;
         padding: 0.6em 2em;
     }
-    .stMetricLabel, .stMetricValue {
-        color: #1f2937 !important;
-        font-weight: bold;
-    }
-    .stMetric {
-        background-color: #ffffff;
+    div[data-testid="metric-container"] {
+        background-color: white;
         border-radius: 12px;
         padding: 1em;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
         margin: 10px 0;
+        box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
+    }
+    div[data-testid="metric-container"] > label, div[data-testid="metric-container"] > div {
+        color: #1f2937 !important;
+        font-weight: 600;
+        font-size: 18px;
     }
     </style>
 """, unsafe_allow_html=True)
