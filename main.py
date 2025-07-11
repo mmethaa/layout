@@ -72,7 +72,9 @@ df_group['%อาคารพาณิชย์'] = df_group['อาคารพ
 bins = [0, 20000, 40000, 60000, 80000, 100000, float("inf")]
 labels = ["≤20k", "20k-40k", "40k-60k", "60k-80k", "80k-100k", "100k+"]
 df_group['กลุ่มพื้นที่'] = pd.cut(df_group['พื้นที่โครงการ(ตรม)'], bins=bins, labels=labels)
-grouped_ratio = df_group.groupby(['เกรดโครงการ', 'กลุ่มพื้นที่'])[["%ทาวโฮม", "%บ้านแฝด", "%บ้านเดี่ยว", "%อาคารพาณิชย์"]].mean().round(3)
+grouped_ratio = df_group.groupby(['เกรดโครงการ', 'กลุ่มพื้นที่'], observed=False)[
+    ["%ทาวโฮม", "%บ้านแฝด", "%บ้านเดี่ยว", "%อาคารพาณิชย์"]
+].mean().round(3)
 grouped_ratio_dict = grouped_ratio.to_dict(orient="index")
 
 def get_ratio_from_lookup(grade, area):
