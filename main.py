@@ -75,6 +75,15 @@ df_group['กลุ่มพื้นที่'] = pd.cut(df_group['พื้น
 grouped_ratio = df_group.groupby(['เกรดโครงการ', 'กลุ่มพื้นที่'], observed=True)[["%ทาวโฮม", "%บ้านแฝด", "%บ้านเดี่ยว", "%อาคารพาณิชย์"]].mean().round(3)
 grouped_ratio_dict = grouped_ratio.to_dict(orient="index")
 
+# -------------------- RULE-BASED ADJUSTMENT --------------------
+def adjust_by_grade_policy(grade, ratios):
+    if grade in ['PRIMO', 'BELLA', 'WATTANALAI']:
+        ratios[2] = min(ratios[2], 0.2)  # บ้านเดี่ยวไม่เกิน 20%
+        remain = 1 - ratios[2] - ratios[3]  # เผื่อไว้ให้บ้านแฝดและทาวน์โฮม
+        ratios[0] = remain * 0.65
+        ratios[1] = remain * 0.35
+    return ratios
+
 def get_ratio_from_lookup(grade, area):
     group = labels[-1]
     for i, b in enumerate(bins[:-1]):
@@ -84,10 +93,11 @@ def get_ratio_from_lookup(grade, area):
     ratio = grouped_ratio_dict.get((grade, group))
     if ratio and any(pd.notna(list(ratio.values()))):
         total = sum([v for v in ratio.values() if pd.notna(v)]) or 1
-        return [ratio.get('%ทาวโฮม', 0)/total,
-                ratio.get('%บ้านแฝด', 0)/total,
-                ratio.get('%บ้านเดี่ยว', 0)/total,
-                ratio.get('%อาคารพาณิชย์', 0)/total]
+        ratios = [ratio.get('%ทาวโฮม', 0)/total,
+                  ratio.get('%บ้านแฝด', 0)/total,
+                  ratio.get('%บ้านเดี่ยว', 0)/total,
+                  ratio.get('%อาคารพาณิชย์', 0)/total]
+        return adjust_by_grade_policy(grade, ratios)
     return None
 
 # -------------------- FORM --------------------
@@ -123,7 +133,9 @@ if submitted:
         ทาวโฮม, บ้านแฝด, บ้านเดี่ยว, อาคารพาณิชย์ = [หลังรวม * r for r in ratio_hist]
     else:
         total = sum(pred[4:8]) or 1
-        ทาวโฮม, บ้านแฝด, บ้านเดี่ยว, อาคารพาณิชย์ = [หลังรวม * (r / total) for r in pred[4:8]]
+        raw_ratios = [r / total for r in pred[4:8]]
+        raw_ratios = adjust_by_grade_policy(เกรด, raw_ratios)
+        ทาวโฮม, บ้านแฝด, บ้านเดี่ยว, อาคารพาณิชย์ = [หลังรวม * r for r in raw_ratios]
 
     ซอย = หลังรวม / avg_ซอยต่อหลัง.get(เกรด, 12)
 
@@ -148,3 +160,4 @@ if submitted:
 
 st.markdown("---")
 st.caption("Developed by mmethaa | Smart Layout AI 🚀")
+
