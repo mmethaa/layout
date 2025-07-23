@@ -7,7 +7,8 @@ from sklearn.metrics import mean_squared_error, r2_score # Import for metrics
 @st.cache_data # Cache the data loading to improve performance
 def load_data():
     try:
-        df = pd.read_excel("layoutdata.xlsx", sheet_name=sheet_name)
+        # ระบุชื่อไฟล์ CSV ให้ถูกต้องตามที่ผู้ใช้แจ้ง
+        df = pd.read_csv('layoutdata.xlsx - Sheet1.csv')
         # Ensure column names are stripped of whitespace for consistency
         df.columns = df.columns.str.strip()
         
@@ -15,20 +16,22 @@ def load_data():
         if 'จำนวนหลัง' not in df.columns:
             df['จำนวนหลัง'] = df['ทาวโฮม'] + df['บ้านแฝด'] + df['บ้านเดี่ยว'] + df['บ้านเดี่ยว3ชั้น'] + df['อาคารพาณิชย์']
         
+        # House types list for iteration (แก้ไข typo 'อาคารพาณิณย์' เป็น 'อาคารพาณิชย์')
+        house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
+
         # Calculate proportion for each house type
-        house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิณย์']
         df['total_houses_for_prop'] = df['ทาวโฮม'] + df['บ้านแฝด'] + df['บ้านเดี่ยว'] + df['บ้านเดี่ยว3ชั้น'] + df['อาคารพาณิชย์']
         for h_type in house_types:
-            # Handle division by zero for proportions
+            # Handle division by zero for proportions more robustly
             df[f'{h_type}_prop'] = df.apply(lambda row: row[h_type] / row['total_houses_for_prop'] if row['total_houses_for_prop'] > 0 else 0, axis=1)
-        df.fillna(0, inplace=True) # Fill NaN proportions with 0
+        df.fillna(0, inplace=True) # Fill NaN proportions with 0 (after division, not before)
 
         return df
     except FileNotFoundError:
-        st.error("Error: 'layoutdata.xlsx - Sheet1.csv' not found. Please ensure the file is in the same directory as the script.")
+        st.error("ข้อผิดพลาด: ไม่พบไฟล์ 'layoutdata.xlsx - Sheet1.csv' กรุณาตรวจสอบให้แน่ใจว่าไฟล์อยู่ในโฟลเดอร์เดียวกันกับสคริปต์")
         st.stop() # Stop the app if data is not found
     except Exception as e:
-        st.error(f"An error occurred while loading or processing data: {e}")
+        st.error(f"เกิดข้อผิดพลาดขณะโหลดหรือประมวลผลข้อมูล: {e}")
         st.stop()
 
 df = load_data()
@@ -40,19 +43,19 @@ if 'พื้นที่สาธา(ตรม)' in df.columns and 'พื้�
     avg_public_area_ratio = (df['พื้นที่สาธา(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
 else:
     avg_public_area_ratio = 0.333 # Fallback if column not found
-    st.warning("Column 'พื้นที่สาธา(ตรม)' or 'พื้นที่โครงการ(ตรม)' not found. Using default public area ratio.")
+    st.warning("ไม่พบหรือไม่สมบูรณ์คอลัมน์ 'พื้นที่สาธา(ตรม)' หรือ 'พื้นที่โครงการ(ตรม)' ใช้ค่าเฉลี่ยเริ่มต้นสำหรับพื้นที่สาธารณะ")
 
 if 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns:
     avg_distributable_area_ratio = (df['พื้นที่จัดจำหน่าย(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
 else:
     avg_distributable_area_ratio = 0.667 # Fallback
-    st.warning("Column 'พื้นที่จัดจำหน่าย(ตรม)' or 'พื้นที่โครงการ(ตรม)' not found. Using default distributable area ratio.")
+    st.warning("ไม่พบหรือไม่สมบูรณ์คอลัมน์ 'พื้นที่จัดจำหน่าย(ตรม)' หรือ 'พื้นที่โครงการ(ตรม)' ใช้ค่าเฉลี่ยเริ่มต้นสำหรับพื้นที่จัดจำหน่าย")
 
 if 'พื้นที่ถนนรวม' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns:
     avg_road_area_ratio = (df['พื้นที่ถนนรวม'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
 else:
     avg_road_area_ratio = 0.30 # Fallback
-    st.warning("Column 'พื้นที่ถนนรวม' or 'พื้นที่โครงการ(ตรม)' not found. Using default road area ratio.")
+    st.warning("ไม่พบหรือไม่สมบูรณ์คอลัมน์ 'พื้นที่ถนนรวม' หรือ 'พื้นที่โครงการ(ตรม)' ใช้ค่าเฉลี่ยเริ่มต้นสำหรับพื้นที่ถนน")
 
 # Average area per unit for each type (from user's request - these are in SQM)
 AREA_TH = 5 * 16  # ทาวน์โฮม (80 sqm)
@@ -64,9 +67,9 @@ if 'จำนวนหลัง' in df.columns and 'พื้นที่จั�
     avg_units_per_dist_area = (df['จำนวนหลัง'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
 else:
     avg_units_per_dist_area = 0.005 # Fallback (e.g. 1 unit per 200 sqm)
-    st.warning("Column 'จำนวนหลัง' or 'พื้นที่จัดจำหน่าย(ตรม)' not found. Using default units per distributable area.")
+    st.warning("ไม่พบหรือไม่สมบูรณ์คอลัมน์ 'จำนวนหลัง' หรือ 'พื้นที่จัดจำหน่าย(ตรม)' ใช้ค่าเฉลี่ยเริ่มต้นสำหรับจำนวนหลังต่อพื้นที่จัดจำหน่าย")
 
-# House types list for iteration
+# House types list for iteration (แก้ไข typo อีกครั้งในส่วนนี้)
 house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
 
 # Group by 'เกรดโครงการ' and 'รูปร่างที่ดิน' to get average proportions
@@ -86,13 +89,13 @@ if 'จำนวนซอย' in df.columns and 'จำนวนหลัง' in
     avg_alley_per_unit = (df['จำนวนซอย'] / df['จำนวนหลัง']).replace([np.inf, -np.inf], np.nan).mean()
 else:
     avg_alley_per_unit = 0.05 # Fallback (e.g. 1 alley per 20 units)
-    st.warning("Column 'จำนวนซอย' or 'จำนวนหลัง' not found. Using default alleys per unit.")
+    st.warning("ไม่พบหรือไม่สมบูรณ์คอลัมน์ 'จำนวนซอย' หรือ 'จำนวนหลัง' ใช้ค่าเฉลี่ยเริ่มต้นสำหรับจำนวนซอยต่อจำนวนหลัง")
 
 if 'จำนวนซอย' in df.columns and 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns:
     avg_alley_per_dist_area = (df['จำนวนซอย'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
 else:
     avg_alley_per_dist_area = 0.0001 # Fallback (e.g. 1 alley per 10000 sqm)
-    st.warning("Column 'จำนวนซอย' or 'พื้นที่จัดจำหน่าย(ตรม)' not found. Using default alleys per distributable area.")
+    st.warning("ไม่พบหรือไม่สมบูรณ์คอลัมน์ 'จำนวนซอย' หรือ 'พื้นที่จัดจำหน่าย(ตรม)' ใช้ค่าเฉลี่ยเริ่มต้นสำหรับจำนวนซอยต่อพื้นที่จัดจำหน่าย")
 
 # --- Helper function for metrics ---
 def calculate_metrics(actual_values, predicted_values):
@@ -105,64 +108,32 @@ def calculate_metrics(actual_values, predicted_values):
     actual_values = actual_values[valid_indices]
     predicted_values = predicted_values[valid_indices]
 
-    if len(actual_values) == 0 or np.all(actual_values == 0) and np.all(predicted_values == 0):
-        # If no valid data or all zeros and predictions are also all zeros, R2 is 1 (perfect fit for trivial case)
-        # MEP is 0 if all are zeros.
-        return {'MEP': 0.0, 'R2': 1.0}
-    elif np.all(actual_values == 0): # All actuals are zero, but predictions are not all zero
-        mep = np.mean(np.abs(predicted_values)) * 100 # Average absolute prediction when actual is 0
-        r2 = r2_score(actual_values, predicted_values) # R2 will be < 0 or low
-        return {'MEP': mep, 'R2': r2}
+    if len(actual_values) == 0:
+        return {'MEP': np.nan, 'R2': np.nan} # No valid data to calculate metrics
 
+    if np.all(actual_values == 0) and np.all(predicted_values == 0):
+        # If all actuals and predictions are zero, it's a perfect fit for this trivial case.
+        return {'MEP': 0.0, 'R2': 1.0}
+    
     # Mean Error Percentage (MEP)
-    # Handle division by zero for actual_values if they can be 0 for specific entries
     diff_abs_percent = []
     for i in range(len(actual_values)):
         if actual_values[i] != 0:
             diff_abs_percent.append(np.abs((actual_values[i] - predicted_values[i]) / actual_values[i]))
-        elif predicted_values[i] != 0: # Actual is 0 but predicted is not 0, contributes to error
-            diff_abs_percent.append(1.0) # 100% error relative to 0 actual
-        # If both are 0, it's 0% error, doesn't contribute to diff_abs_percent
+        elif predicted_values[i] != 0: # Actual is 0 but predicted is not 0, contributes to error (100% relative error)
+            diff_abs_percent.append(1.0) 
+        # If both are 0, it contributes 0 to error, not added to diff_abs_percent
 
     mep = np.mean(diff_abs_percent) * 100 if diff_abs_percent else 0.0
 
     # R-squared
-    r2 = r2_score(actual_values, predicted_values)
+    # Ensure there's variance in actual_values for R2 calculation
+    if np.var(actual_values) == 0:
+        r2 = 1.0 if np.all(actual_values == predicted_values) else 0.0 # If actuals are constant, R2 is 1 if predictions are same, else 0
+    else:
+        r2 = r2_score(actual_values, predicted_values)
 
     return {'MEP': mep, 'R2': r2}
-
-
-# --- Calculate Model Performance Metrics on Historical Data ---
-# This part runs once when the app starts to show overall model accuracy
-actual_total_units = []
-predicted_total_units_for_metrics = []
-actual_distributable_areas = [] # In SQM
-predicted_distributable_areas_for_metrics = [] # In SQM
-actual_alleys = []
-predicted_alleys_for_metrics = []
-
-for index, row in df.iterrows():
-    # Make sure to pass project_area_sqm to the function, which will be converted inside
-    # We are calculating metrics based on actual historical data that is in SQM
-    pred_metrics = predict_project_layout_internal( # Use internal function that expects SQM
-        project_area_sqm_input=row['พื้นที่โครงการ(ตรม)'],
-        land_shape=row['รูปร่างที่ดิน'],
-        project_grade=row['เกรดโครงการ'],
-        province=row['จังหวัด']
-    )
-    
-    actual_total_units.append(row['จำนวนหลัง'])
-    predicted_total_units_for_metrics.append(pred_metrics['จำนวนแปลง (รวม)'])
-    
-    actual_distributable_areas.append(row['พื้นที่จัดจำหน่าย(ตรม)'])
-    predicted_distributable_areas_for_metrics.append(pred_metrics['พื้นที่จัดจำหน่าย (ตรม.)'])
-    
-    actual_alleys.append(row['จำนวนซอย'])
-    predicted_alleys_for_metrics.append(pred_metrics['จำนวนซอย'])
-
-metrics_total_units = calculate_metrics(actual_total_units, predicted_total_units_for_metrics)
-metrics_dist_area = calculate_metrics(actual_distributable_areas, predicted_distributable_areas_for_metrics)
-metrics_alleys = calculate_metrics(actual_alleys, predicted_alleys_for_metrics)
 
 
 # --- 3. Prediction Function (Internal, works with SQM) ---
@@ -207,7 +178,7 @@ def predict_project_layout_internal(
     if project_grade in grade_rules:
         # For LUXURY, set all others to 0 and ensure บ้านเดี่ยว takes all proportion
         if project_grade == 'LUXURY':
-            for h_type in house_types:
+            for h_type in house_types: # Ensure 'house_types' is the corrected list
                 if h_type != 'บ้านเดี่ยว':
                     predicted_units[h_type] = 0
             remaining_house_types = ['บ้านเดี่ยว']
@@ -226,26 +197,34 @@ def predict_project_layout_internal(
             current_proportions = proportions_df[[f'{h_type}_prop' for h_type in remaining_house_types]].values.flatten()
             if current_proportions.sum() > 0:
                 current_proportions /= current_proportions.sum() # Normalize remaining proportions
-            else: # Fallback to general average if normalized sum is zero (shouldn't happen if data exists)
-                current_proportions = df[[f'{h_type}_prop' for h_type in remaining_house_types]].mean().values
-                if current_proportions.sum() > 0:
-                    current_proportions /= current_proportions.sum()
+            else: # Fallback to general average if normalized sum is zero (shouldn't happen if data exists for remaining types)
+                general_avg_props_remaining = df[[f'{h_type}_prop' for h_type in remaining_house_types]].mean().values
+                if general_avg_props_remaining.sum() > 0:
+                    current_proportions = general_avg_props_remaining / general_avg_props_remaining.sum()
+                else: # If still zero, distribute equally among remaining if any
+                    if len(remaining_house_types) > 0:
+                        current_proportions = np.ones(len(remaining_house_types)) / len(remaining_house_types)
+                    else:
+                        current_proportions = np.array([]) # No remaining types
+
         else: # Fallback to general average if no specific proportions found for grade/shape
-            current_proportions = df[[f'{h_type}_prop' for h_type in remaining_house_types]].mean().values
-            if current_proportions.sum() > 0:
-                current_proportions /= current_proportions.sum()
+            general_avg_props_remaining = df[[f'{h_type}_prop' for h_type in remaining_house_types]].mean().values
+            if general_avg_props_remaining.sum() > 0:
+                current_proportions = general_avg_props_remaining / general_avg_props_remaining.sum()
             else: # If still zero, distribute equally among remaining if any
                 if len(remaining_house_types) > 0:
                     current_proportions = np.ones(len(remaining_house_types)) / len(remaining_house_types)
+                else:
+                    current_proportions = np.array([]) # No remaining types
 
 
         # Distribute estimated total units among remaining house types
         temp_predicted_remaining_units = {}
         for i, h_type in enumerate(remaining_house_types):
-            if i < len(current_proportions):
+            if i < len(current_proportions): # Ensure index is within bounds
                 temp_predicted_remaining_units[h_type] = round(estimated_total_units_from_area * current_proportions[i])
         
-        # Merge back with already set units (e.g., those fixed at 0)
+        # Merge back with already set units (e.g., those fixed at 0 by grade rules)
         for h_type in remaining_house_types:
             predicted_units[h_type] = temp_predicted_remaining_units.get(h_type, 0)
 
@@ -315,6 +294,48 @@ def predict_project_layout_internal(
         'จำนวนซอย': max(1, predicted_alleys)
     }
 
+# --- Calculate Model Performance Metrics on Historical Data ---
+# This part runs once when the app starts to show overall model accuracy
+actual_total_units = []
+predicted_total_units_for_metrics = []
+actual_distributable_areas = [] # In SQM
+predicted_distributable_areas_for_metrics = [] # In SQM
+actual_alleys = []
+predicted_alleys_for_metrics = []
+
+for index, row in df.iterrows():
+    # Make sure to pass project_area_sqm to the function, which will be converted inside
+    # We are calculating metrics based on actual historical data that is in SQM
+    
+    # Check if necessary columns exist before proceeding for metrics calculation
+    if 'พื้นที่โครงการ(ตรม)' in row and 'รูปร่างที่ดิน' in row and \
+       'เกรดโครงการ' in row and 'จังหวัด' in row and \
+       'จำนวนหลัง' in row and 'พื้นที่จัดจำหน่าย(ตรม)' in row and 'จำนวนซอย' in row:
+        
+        pred_metrics = predict_project_layout_internal( # Use internal function that expects SQM
+            project_area_sqm_input=row['พื้นที่โครงการ(ตรม)'],
+            land_shape=row['รูปร่างที่ดิน'],
+            project_grade=row['เกรดโครงการ'],
+            province=row['จังหวัด']
+        )
+        
+        actual_total_units.append(row['จำนวนหลัง'])
+        predicted_total_units_for_metrics.append(pred_metrics['จำนวนแปลง (รวม)'])
+        
+        actual_distributable_areas.append(row['พื้นที่จัดจำหน่าย(ตรม)'])
+        predicted_distributable_areas_for_metrics.append(pred_metrics['พื้นที่จัดจำหน่าย (ตรม.)'])
+        
+        actual_alleys.append(row['จำนวนซอย'])
+        predicted_alleys_for_metrics.append(pred_metrics['จำนวนซอย'])
+    else:
+        st.warning(f"ข้ามแถวที่ {index} ในข้อมูลย้อนหลังเนื่องจากข้อมูลไม่ครบถ้วนสำหรับการคำนวณ Metrics")
+
+
+metrics_total_units = calculate_metrics(actual_total_units, predicted_total_units_for_metrics)
+metrics_dist_area = calculate_metrics(actual_distributable_areas, predicted_distributable_areas_for_metrics)
+metrics_alleys = calculate_metrics(actual_alleys, predicted_alleys_for_metrics)
+
+
 # --- 4. Main Prediction Function (User-facing, handles SQW) ---
 def predict_project_layout_sqw(
     project_area_sqw_input: float, # Input is in Square Wah
@@ -377,9 +398,11 @@ st.sidebar.metric(label="จำนวนซอย - ค่าคลาดเค�
 st.sidebar.metric(label="จำนวนซอย - R-squared ($R^2$)", value=f"{metrics_alleys['R2']:.2f}")
 
 # Get unique values for dropdowns from loaded data
-unique_land_shapes = df['รูปร่างที่ดิน'].unique().tolist()
-unique_grades = df['เกรดโครงการ'].unique().tolist()
-unique_provinces = df['จังหวัด'].unique().tolist()
+# ตรวจสอบว่าคอลัมน์มีอยู่จริงก่อนที่จะดึงค่า unique
+unique_land_shapes = df['รูปร่างที่ดิน'].unique().tolist() if 'รูปร่างที่ดิน' in df.columns else []
+unique_grades = df['เกรดโครงการ'].unique().tolist() if 'เกรดโครงการ' in df.columns else []
+unique_provinces = df['จังหวัด'].unique().tolist() if 'จังหวัด' in df.columns else []
+
 
 # Input widgets
 st.header("ข้อมูลโครงการใหม่")
@@ -394,28 +417,58 @@ with col1:
         help="ป้อนพื้นที่รวมของโครงการใหม่เป็นตารางวา"
     )
 with col2:
-    land_shape = st.selectbox(
-        "รูปร่างที่ดิน",
-        options=unique_land_shapes,
-        help="เลือกรูปร่างที่ดินของโครงการใหม่"
-    )
+    if unique_land_shapes:
+        land_shape = st.selectbox(
+            "รูปร่างที่ดิน",
+            options=unique_land_shapes,
+            help="เลือกรูปร่างที่ดินของโครงการใหม่"
+        )
+    else:
+        land_shape = st.selectbox(
+            "รูปร่างที่ดิน",
+            options=["ไม่พบข้อมูล"], # Fallback
+            help="ไม่พบข้อมูลรูปร่างที่ดินในไฟล์ CSV"
+        )
+        st.warning("ไม่พบข้อมูลรูปร่างที่ดินในไฟล์ CSV กรุณาตรวจสอบคอลัมน์ 'รูปร่างที่ดิน'")
+
 
 col3, col4 = st.columns(2)
 with col3:
-    project_grade = st.selectbox(
-        "เกรดโครงการ",
-        options=unique_grades,
-        help="เลือกเกรดของโครงการ (เช่น PREMIUM, LUXURY, BELLA)"
-    )
+    if unique_grades:
+        project_grade = st.selectbox(
+            "เกรดโครงการ",
+            options=unique_grades,
+            help="เลือกเกรดของโครงการ (เช่น PREMIUM, LUXURY, BELLA)"
+        )
+    else:
+        project_grade = st.selectbox(
+            "เกรดโครงการ",
+            options=["ไม่พบข้อมูล"], # Fallback
+            help="ไม่พบข้อมูลเกรดโครงการในไฟล์ CSV"
+        )
+        st.warning("ไม่พบข้อมูลเกรดโครงการในไฟล์ CSV กรุณาตรวจสอบคอลัมน์ 'เกรดโครงการ'")
+
 with col4:
-    province = st.selectbox(
-        "จังหวัด",
-        options=unique_provinces,
-        help="เลือกจังหวัดที่โครงการตั้งอยู่ (ปัจจุบันไม่ได้ใช้ในการคำนวณโดยตรง)"
-    )
+    if unique_provinces:
+        province = st.selectbox(
+            "จังหวัด",
+            options=unique_provinces,
+            help="เลือกจังหวัดที่โครงการตั้งอยู่ (ปัจจุบันไม่ได้ใช้ในการคำนวณโดยตรง)"
+        )
+    else:
+        province = st.selectbox(
+            "จังหวัด",
+            options=["ไม่พบข้อมูล"], # Fallback
+            help="ไม่พบข้อมูลจังหวัดในไฟล์ CSV"
+        )
+        st.warning("ไม่พบข้อมูลจังหวัดในไฟล์ CSV กรุณาตรวจสอบคอลัมน์ 'จังหวัด'")
+
 
 if st.button("ทำนายผังโครงการ"):
-    if project_area_sqw <= 0:
+    # ตรวจสอบว่าเลือกข้อมูลจาก Dropdown ที่ถูกต้อง
+    if "ไม่พบข้อมูล" in [land_shape, project_grade, province]:
+        st.error("กรุณาแก้ไขข้อผิดพลาดเกี่ยวกับการไม่พบข้อมูลใน dropdowns ก่อนทำการทำนาย")
+    elif project_area_sqw <= 0:
         st.error("กรุณาป้อน 'พื้นที่โครงการ' ที่มากกว่า 0.")
     else:
         # Perform prediction using the SQW function
