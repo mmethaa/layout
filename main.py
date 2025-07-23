@@ -6,7 +6,7 @@ import numpy as np
 @st.cache_data # Cache the data loading to improve performance
 def load_data():
     try:
-        df = pd.read_csv('layoutdata.xlsx - Sheet1.csv')
+        df = pd.read_excel('layoutdata.xlsx', sheet_name="Sheet1")
         # Ensure column names are stripped of whitespace for consistency
         df.columns = df.columns.str.strip()
         
