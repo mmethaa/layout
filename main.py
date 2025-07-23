@@ -99,7 +99,6 @@ st.write(f"**R² Score:** {r2:.4f}")
 
 if only_bd_grades:
     st.info(f"เกรดโครงการที่พบว่าในอดีตมีเฉพาะบ้านเดี่ยวเท่านั้น: {', '.join(only_bd_grades)}")
-
 # --- Helper function for metrics ---
 def calculate_metrics(actual_values, predicted_values):
     """Calculates MEP and R-squared, handling potential NaNs and zero actuals for MEP."""
