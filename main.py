@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.model_selection import train_test_split
@@ -47,97 +48,46 @@ df['พื้นที่สาธา(ตรม)'] *= sqm_to_sqwah
 df['พื้นที่สวน(5%ของพื้นที่จัดจำหน่าย)'] *= sqm_to_sqwah
 df['พื้นที่ถนนรวม'] *= sqm_to_sqwah
 
-for col in ['ความกว้าง(ทาวโฮม)', 'ความยาว(ทาวโฮม)', 'ความกว้าง(บ้านแฝด)', 'ความยาว(บ้านแฝด)', 'ความกว้าง(บ้านเดี่ยว)', 'ความยาว(บ้านเดี่ยว)']:
-    df[col] = df[col].fillna(0)
+# House dimension conversion
+house_dims = {
+    'ทาวโฮม': (5, 16),
+    'บ้านแฝด': (10, 16),
+    'บ้านเดี่ยว': (15, 18)
+}
 
-for t in ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว']:
-    df[f'พื้นที่เฉลี่ย({t})'] = df[f'ความกว้าง({t})'] * df[f'ความยาว({t})']
+for htype, (w, l) in house_dims.items():
+    df[f'ความกว้าง({htype})'] = w
+    df[f'ความยาว({htype})'] = l
+    df[f'พื้นที่เฉลี่ย({htype})'] = w * l
 
-# Filter to ensure some grades only have บ้านเดี่ยว
-only_bd_grades = df.groupby("เกรดโครงการ")[['ทาวโฮม', 'บ้านแฝด', 'อาคารพาณิชย์']].sum()
-only_bd_grades = only_bd_grades[(only_bd_grades == 0).all(axis=1)].index.tolist()
+# Add area ratios
+house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
+for h in house_types:
+    col_name = f'{h}_prop'
+    df[col_name] = df[h] / df['จำนวนหลัง'].replace(0, 1)
 
-# Target ratios
-df['หลังต่อซอย'] = df['จำนวนหลัง'] / df['จำนวนซอย'].replace(0, 1)
-df['%บ้านเดี่ยว'] = df['บ้านเดี่ยว'] / df['จำนวนหลัง'].replace(0, 1)
-df['%บ้านแฝด'] = df['บ้านแฝด'] / df['จำนวนหลัง'].replace(0, 1)
-df['%ทาวโฮม'] = df['ทาวโฮม'] / df['จำนวนหลัง'].replace(0, 1)
-df['%พื้นที่ขาย'] = df['พื้นที่จัดจำหน่าย(ตรม)'] / df['พื้นที่โครงการ(ตรม)']
-df['%พื้นที่สาธา'] = df['พื้นที่สาธา(ตรม)'] / df['พื้นที่โครงการ(ตรม)']
-df['%พื้นที่สวน'] = df['พื้นที่สวน(5%ของพื้นที่จัดจำหน่าย)'] / df['พื้นที่โครงการ(ตรม)']
-df['%ถนนในสาธารณะ'] = (df['พื้นที่ถนนรวม'] / df['พื้นที่สาธา(ตรม)']).fillna(0)
+# Add dummy rules for certain grades that only allow บ้านเดี่ยว
+grade_rules = {
+    g: {'บ้านเดี่ยว': 1.0} for g in df['เกรดโครงการ'].unique() if ((df[df['เกรดโครงการ'] == g][['ทาวโฮม','บ้านแฝด','อาคารพาณิชย์']].sum().sum()) == 0)
+}
 
-ถนน_ต่อ_สาธารณะ_เฉลี่ย = df['%ถนนในสาธารณะ'].mean()
+avg_public_area_ratio = df['พื้นที่สาธา(ตรม)'].sum() / df['พื้นที่โครงการ(ตรม)'].sum()
+avg_distributable_area_ratio = df['พื้นที่จัดจำหน่าย(ตรม)'].sum() / df['พื้นที่โครงการ(ตรม)'].sum()
+avg_road_area_ratio = df['พื้นที่ถนนรวม'].sum() / df['พื้นที่โครงการ(ตรม)'].sum()
+avg_units_per_dist_area = df['จำนวนหลัง'].sum() / df['พื้นที่จัดจำหน่าย(ตรม)'].sum()
+avg_alley_per_unit = df['จำนวนซอย'].sum() / df['จำนวนหลัง'].sum()
+avg_alley_per_dist_area = df['จำนวนซอย'].sum() / df['พื้นที่จัดจำหน่าย(ตรม)'].sum()
 
-X_raw = df[[
-    'จังหวัด', 'เกรดโครงการ', 'พื้นที่โครงการ(ตรม)', 'รูปร่างที่ดิน',
-    'ความยาวถนน', 'ความกว้างถนนปกติ',
-    'พื้นที่เฉลี่ย(ทาวโฮม)', 'พื้นที่เฉลี่ย(บ้านแฝด)', 'พื้นที่เฉลี่ย(บ้านเดี่ยว)']]
+AREA_TH = house_dims['ทาวโฮม'][0] * house_dims['ทาวโฮม'][1]
+AREA_BA = house_dims['บ้านแฝด'][0] * house_dims['บ้านแฝด'][1]
+AREA_BD = house_dims['บ้านเดี่ยว'][0] * house_dims['บ้านเดี่ยว'][1]
 
-y_ratio = pd.DataFrame({
-    'สัดส่วนพื้นที่สาธา': df['%พื้นที่สาธา'],
-    'สัดส่วนพื้นที่จัดจำหน่าย': df['%พื้นที่ขาย'],
-    'สัดส่วนพื้นที่สวน': df['%พื้นที่สวน'],
-    'จำนวนหลังต่อไร่': df['จำนวนหลัง'] / (df['พื้นที่โครงการ(ตรม)'] / 400),
-    'สัดส่วนทาวโฮม': df['%ทาวโฮม'],
-    'สัดส่วนบ้านแฝด': df['%บ้านแฝด'],
-    'สัดส่วนบ้านเดี่ยว': df['%บ้านเดี่ยว'],
-    'สัดส่วนอาคารพาณิชย์': df['อาคารพาณิชย์'] / df['จำนวนหลัง'].replace(0, 1)
-})
+# Create mapping for grade + shape proportions
+grade_land_shape_proportions = df.groupby(['เกรดโครงการ','รูปร่างที่ดิน'])[[f'{h}_prop' for h in house_types]].mean()
 
-X = pd.get_dummies(X_raw, columns=['จังหวัด', 'เกรดโครงการ', 'รูปร่างที่ดิน'])
-X_train, _, y_train, _ = train_test_split(X, y_ratio, test_size=0.2, random_state=42)
+# Finished setup — next phase would include prediction functions and UI integration
 
-model = MultiOutputRegressor(RandomForestRegressor(n_estimators=100, random_state=42)).fit(X_train, y_train)
-
-st.markdown("## 📈 ความแม่นยำของโมเดล")
-y_pred = model.predict(X_train)
-mae = mean_absolute_error(y_train, y_pred)
-r2 = r2_score(y_train, y_pred)
-st.write(f"**MAE (Mean Absolute Error):** {mae:.4f}")
-st.write(f"**R² Score:** {r2:.4f}")
-
-if only_bd_grades:
-    st.info(f"เกรดโครงการที่พบว่าในอดีตมีเฉพาะบ้านเดี่ยวเท่านั้น: {', '.join(only_bd_grades)}")
-# --- Helper function for metrics ---
-def calculate_metrics(actual_values, predicted_values):
-    """Calculates MEP and R-squared, handling potential NaNs and zero actuals for MEP."""
-    actual_values = np.array(actual_values).flatten()
-    predicted_values = np.array(predicted_values).flatten()
-
-    # Filter out NaN values from both arrays to avoid errors
-    valid_indices = ~np.isnan(actual_values) & ~np.isnan(predicted_values)
-    actual_values = actual_values[valid_indices]
-    predicted_values = predicted_values[valid_indices]
-
-    if len(actual_values) == 0:
-        return {'MEP': np.nan, 'R2': np.nan} # No valid data to calculate metrics
-
-    if np.all(actual_values == 0) and np.all(predicted_values == 0):
-        # If all actuals and predictions are zero, it's a perfect fit for this trivial case.
-        return {'MEP': 0.0, 'R2': 1.0}
-    
-    # Mean Error Percentage (MEP)
-    diff_abs_percent = []
-    for i in range(len(actual_values)):
-        if actual_values[i] != 0:
-            diff_abs_percent.append(np.abs((actual_values[i] - predicted_values[i]) / actual_values[i]))
-        elif predicted_values[i] != 0: # Actual is 0 but predicted is not 0, contributes to error (100% relative error)
-            diff_abs_percent.append(1.0) 
-        # If both are 0, it contributes 0 to error, not added to diff_abs_percent
-
-    mep = np.mean(diff_abs_percent) * 100 if diff_abs_percent else 0.0
-
-    # R-squared
-    # Ensure there's variance in actual_values for R2 calculation
-    if np.var(actual_values) == 0:
-        r2 = 1.0 if np.all(actual_values == predicted_values) else 0.0 # If actuals are constant, R2 is 1 if predictions are same, else 0
-    else:
-        r2 = r2_score(actual_values, predicted_values)
-
-    return {'MEP': mep, 'R2': r2}
-
-
+st.success("✅ ข้อมูลพร้อมแล้วสำหรับการพัฒนาโมเดลทำนาย")
 # --- 3. Prediction Function (Internal, works with SQM) ---
 # This function will work internally with SQM, and the main UI function will handle SQW conversion
 def predict_project_layout_internal(
