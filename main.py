@@ -7,7 +7,7 @@ from sklearn.metrics import mean_squared_error, r2_score # Import for metrics
 @st.cache_data # Cache the data loading to improve performance
 def load_data():
     try:
-        df = pd.read_csv('layoutdata.xlsx - Sheet1.csv')
+        df = pd.read_excel("layoutdata.xlsx", sheet_name=sheet_name)
         # Ensure column names are stripped of whitespace for consistency
         df.columns = df.columns.str.strip()
         
