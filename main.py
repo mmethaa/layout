@@ -6,7 +6,7 @@ import numpy as np
 # Load the historical data directly from the file system.
 # The file 'layoutdata.xlsx - Sheet1.csv' MUST be in the same directory as this script.
 try:
-    df = pd.read_csv('layoutdata.xlsx - Sheet1.csv')
+    df = pd.read_csv('layoutdata.xlsx)
     # Ensure column names are stripped of whitespace for consistency
     df.columns = df.columns.str.strip()
     
