@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from sklearn.metrics import r2_score
 
 # --- 1. Load Data ---
 try:
@@ -103,7 +104,7 @@ if st.button("ทำนายผังโครงการ"):
     st.dataframe(pd.DataFrame(result.items(), columns=['รายการ', 'ค่าทำนาย']), use_container_width=True)
 
     actual = df['จำนวนหลัง'][:10]
-    pred = df['พื้นที่จัดจำหน่าย(ตรม)'][:10] * avg_units_per_dist_area
+    pred = df['พื้นที่จัดจำหน่าย(ตรม)'][:10] * sqm_to_sqwah * avg_units_per_dist_area
     mep, r2 = calculate_metrics(actual, pred)
     st.metric("MEP", f"{mep:.2f}%")
     st.metric("R²", f"{r2:.2f}")
