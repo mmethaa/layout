@@ -1,145 +1,265 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.metrics import mean_absolute_error, r2_score
 
-st.set_page_config(page_title="Smart Layout AI", page_icon="🌇️", layout="centered")
+# Load the historical data
+try:
+    df = pd.read_csv('layoutdata.xlsx - Sheet1.csv')
+except FileNotFoundError:
+    print("Error: 'layoutdata.xlsx - Sheet1.csv' not found. Please ensure the file is in the correct directory.")
+    # Exit or handle the error appropriately
+    exit()
 
-st.markdown("""
-    <style>
-    html, body, [class*="css"]  {
-        font-family: 'Segoe UI', sans-serif;
-        background-color: #f0f4f8;
-    }
-    .stButton>button {
-        background: linear-gradient(to right, #0f4c75, #3282b8);
-        color: white;
-        font-size: 18px;
-        border-radius: 10px;
-        padding: 0.6em 2em;
-    }
-    div[data-testid="metric-container"] {
-        background-color: white;
-        border-radius: 12px;
-        padding: 1em;
-        margin: 10px 0;
-        box-shadow: 0px 4px 12px rgba(0,0,0,0.08);
-    }
-    div[data-testid="metric-container"] > label, div[data-testid="metric-container"] > div {
-        color: #1f2937 !important;
-        font-weight: 600;
-        font-size: 18px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# --- Pre-calculate average ratios and proportions from historical data ---
 
-# Load Excel and prepare
-sheet_name = "Sheet1"
-df = pd.read_excel("layoutdata.xlsx", sheet_name=sheet_name)
-df.columns = df.columns.str.strip()
+# Ratios for area calculations
+avg_public_area_ratio = (df['พื้นที่สาธา(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).mean()
+avg_distributable_area_ratio = (df['พื้นที่จัดจำหน่าย(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).mean()
+avg_road_area_ratio = (df['พื้นที่ถนนรวม'] / df['พื้นที่โครงการ(ตรม)']).mean()
 
-# Convert sqm to sq.wah (1 ตร.ม. = 0.25 ตร.วา)
-sqm_to_sqwah = 0.25
-for col in ['พื้นที่โครงการ(ตรม)', 'พื้นที่จัดจำหน่าย(ตรม)', 'พื้นที่สาธา(ตรม)', 'พื้นที่สวน(5%ของพื้นที่จัดจำหน่าย)', 'พื้นที่ถนนรวม']:
-    df[col] *= sqm_to_sqwah
+# Average area per unit for each type (from user's request)
+AREA_TH = 5 * 16  # ทาวน์โฮม
+AREA_BA = 12 * 16 # บ้านแฝด
+AREA_BD = 15 * 18 # บ้านเดี่ยว
 
-# Define average unit area per house type (ตร.วา)
-house_dims = {
-    'ทาวโฮม': 5 * 16 * sqm_to_sqwah,
-    'บ้านแฝด': 10 * 16 * sqm_to_sqwah,
-    'บ้านเดี่ยว': 15 * 18 * sqm_to_sqwah
+# Average units per distributable area (overall)
+# Calculate total units
+df['Total_Units'] = df['ทาวโฮม'] + df['บ้านแฝด'] + df['บ้านเดี่ยว'] + df['บ้านเดี่ยว3ชั้น'] + df['อาคารพาณิชย์']
+# Avoid division by zero for projects with no distributable area or no units
+avg_units_per_dist_area = (df['Total_Units'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
+
+
+# Proportions of house types by Grade and Land Shape
+# Create a combined 'type' column for easier calculation of proportions
+df['total_houses'] = df['ทาวโฮม'] + df['บ้านแฝด'] + df['บ้านเดี่ยว'] + df['บ้านเดี่ยว3ชั้น'] + df['อาคารพาณิชย์']
+
+# Calculate proportion for each house type
+house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชมย์']
+for h_type in house_types:
+    df[f'{h_type}_prop'] = df[h_type] / df['total_houses']
+df.fillna(0, inplace=True) # Fill NaN proportions with 0 (for projects with no specific house type)
+
+# Group by 'เกรดโครงการ' and 'รูปร่างที่ดิน' to get average proportions
+grade_land_shape_proportions = df.groupby(['เกรดโครงการ', 'รูปร่างที่ดิน'])[
+    [f'{h_type}_prop' for h_type in house_types]
+].mean()
+
+# Rules for specific grades (based on initial observation)
+grade_rules = {
+    'LUXURY': {'ทาวโฮม': 0, 'บ้านแฝด': 0, 'บ้านเดี่ยว3ชั้น': 0, 'อาคารพาณิชย์': 0}, # Only บ้านเดี่ยว
+    'PREMIUM': {'ทาวโฮม': 0, 'บ้านเดี่ยว3ชั้น': 0, 'อาคารพาณิชย์': 0} # Mostly บ้านเดี่ยว, some บ้านแฝด possible
+    # Other grades will use average proportions
 }
 
-# Add total units column
-df['total_units'] = df[['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']].sum(axis=1)
+# Average number of alleys per total units
+avg_alley_per_unit = (df['จำนวนซอย'] / df['Total_Units']).replace([np.inf, -np.inf], np.nan).mean()
+# Fallback if units is zero
+avg_alley_per_dist_area = (df['จำนวนซอย'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
 
-# Calculate proportions per house type
-types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
-for t in types:
-    df[f'{t}_prop'] = df[t] / df['total_units'].replace(0, 1)
 
-df.fillna(0, inplace=True)
+def predict_project_layout(
+    project_area_sqm: float,
+    land_shape: str,
+    project_grade: str,
+    province: str
+) -> dict:
+    """
+    Predicts various layout metrics for a new project based on historical data.
 
-# Compute averages
-avg_public_area_ratio = (df['พื้นที่สาธา(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).mean()
-avg_dist_area_ratio = (df['พื้นที่จัดจำหน่าย(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).mean()
-avg_road_area_ratio = (df['พื้นที่ถนนรวม'] / df['พื้นที่โครงการ(ตรม)']).mean()
-avg_units_per_dist_area = (df['total_units'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
-avg_alley_per_unit = (df['จำนวนซอย'] / df['total_units']).replace([np.inf, -np.inf], np.nan).mean()
+    Args:
+        project_area_sqm (float): Total project area in square meters.
+        land_shape (str): The shape of the land (e.g., 'รูปทรงสี่เหลี่ยม / บล็อกแน่น').
+                          Valid values are from the 'รูปร่างที่ดิน' column in the dataset.
+        project_grade (str): The grade of the project (e.g., 'BELLA', 'LUXURY').
+                             Valid values are from the 'เกรดโครงการ' column.
+        province (str): The province where the project is located.
 
-# Group proportions by grade and shape
-grade_land_shape_proportions = df.groupby(['เกรดโครงการ','รูปร่างที่ดิน'])[[f'{t}_prop' for t in types]].mean()
+    Returns:
+        dict: A dictionary containing predicted layout metrics.
+    """
 
-# Detect exclusive บ้านเดี่ยว grades
-grade_rules = {}
-for g in df['เกรดโครงการ'].unique():
-    sub = df[df['เกรดโครงการ'] == g]
-    if (sub[['ทาวโฮม','บ้านแฝด','อาคารพาณิชย์']].sum().sum() == 0):
-        grade_rules[g] = {'บ้านเดี่ยว': 1.0}
+    # 1. Predict Area Allocations
+    predicted_public_area = project_area_sqm * avg_public_area_ratio
+    predicted_distributable_area = project_area_sqm * avg_distributable_area_ratio
+    predicted_garden_area = predicted_distributable_area * 0.05
+    predicted_road_area = project_area_sqm * avg_road_area_ratio
 
-def predict(project_area_wah, grade, shape):
-    dist_area = project_area_wah * avg_dist_area_ratio
-    public_area = project_area_wah * avg_public_area_ratio
-    road_area = project_area_wah * avg_road_area_ratio
-    garden_area = dist_area * 0.05
+    # Ensure total allocated area does not exceed project area
+    total_allocated_sum = predicted_public_area + predicted_distributable_area + predicted_road_area
+    if total_allocated_sum > project_area_sqm:
+        # Adjust proportionally if sum exceeds total (shouldn't happen with ratios from same sum)
+        # This is a fallback, ideally ratios sum to 1
+        scale_factor = project_area_sqm / total_allocated_sum
+        predicted_public_area *= scale_factor
+        predicted_distributable_area *= scale_factor
+        predicted_road_area *= scale_factor
 
-    prop_df = grade_land_shape_proportions.loc[(grade, shape)] if (grade, shape) in grade_land_shape_proportions.index else None
+    # 2. Predict Number of Units by Type and Total Units
+    predicted_units = {
+        'ทาวโฮม': 0,
+        'บ้านแฝด': 0,
+        'บ้านเดี่ยว': 0,
+        'บ้านเดี่ยว3ชั้น': 0,
+        'อาคารพาณิชย์': 0
+    }
+    total_predicted_units = 0
 
-    prop = {t: 0 for t in types}
-    if grade in grade_rules:
-        prop.update(grade_rules[grade])
-    elif prop_df is not None:
-        for t in types:
-            prop[t] = prop_df.get(f'{t}_prop', 0)
-    else:
-        for t in types:
-            prop[t] = df[f'{t}_prop'].mean()
+    # Get proportions based on Grade and Land Shape
+    proportions_df = grade_land_shape_proportions.loc[(project_grade, land_shape), :] if (project_grade, land_shape) in grade_land_shape_proportions.index else None
 
-    total_units_est = dist_area * avg_units_per_dist_area
-    known = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว']
-    total_area = sum(prop[t] * total_units_est * house_dims.get(t, 0) for t in known)
+    # Apply grade-specific rules first
+    if project_grade in grade_rules:
+        # Initialize with rules
+        for h_type, value in grade_rules[project_grade].items():
+            predicted_units[h_type] = value
+        
+        # Adjust proportions for remaining types
+        remaining_house_types = [h for h in house_types if h not in grade_rules[project_grade]]
+        
+        if proportions_df is not None:
+            # Use specific proportions if available
+            current_proportions = proportions_df[
+                [f'{h_type}_prop' for h_type in remaining_house_types]
+            ].values.flatten()
+            
+            # Normalize remaining proportions
+            if current_proportions.sum() > 0:
+                current_proportions /= current_proportions.sum()
+            else: # Fallback to general average if no historical data for remaining types for this grade/shape
+                general_proportions = df[[f'{h_type}_prop' for h_type in remaining_house_types]].mean().values
+                if general_proportions.sum() > 0:
+                    general_proportions /= general_proportions.sum()
+                current_proportions = general_proportions
+        else:
+            # Fallback to general average if no specific proportions found for grade/shape
+            current_proportions = df[[f'{h_type}_prop' for h_type in remaining_house_types]].mean().values
+            if current_proportions.sum() > 0:
+                current_proportions /= current_proportions.sum()
 
-    scale = dist_area / total_area if total_area > 0 else 1
-    result = {}
-    for t in known:
-        result[t] = round(prop[t] * total_units_est * scale)
-    for t in ['บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']:
-        result[t] = round(prop[t] * total_units_est)
-    result['รวม'] = sum(result.values())
-    result['ซอย'] = max(1, round(result['รวม'] * avg_alley_per_unit))
+        # Calculate a weighted average area per unit for the project
+        # This is an iterative approach to find total units
+        
+        # Start with an estimate of total units based on average density
+        estimated_total_units = round(predicted_distributable_area * avg_units_per_dist_area)
+        
+        # Distribute these units based on calculated proportions
+        total_area_consumed = 0
+        for i, h_type in enumerate(remaining_house_types):
+            num_units = round(estimated_total_units * current_proportions[i])
+            predicted_units[h_type] = num_units
+            
+            # Add to total area consumed based on unit type
+            if h_type == 'ทาวโฮม':
+                total_area_consumed += num_units * AREA_TH
+            elif h_type == 'บ้านแฝด':
+                total_area_consumed += num_units * AREA_BA
+            elif h_type == 'บ้านเดี่ยว':
+                total_area_consumed += num_units * AREA_BD
+            # Note: For บ้านเดี่ยว3ชั้น and อาคารพาณิชย์, we don't have specified area, so we assume they take up space but don't explicitly calculate their area here.
+            # If they exist in grade_rules, they are set to 0. Otherwise, their proportion is used from historical data.
+
+        # Refine total units based on total distributable area and consumed area
+        # This is a simple refinement. A more complex model might iterate.
+        if total_area_consumed > 0:
+            # Re-estimate total units if area_consumed is significantly different
+            # We assume a fixed average area for บ้านเดี่ยว3ชั้น and อาคารพาณิชย์ if they are present and not set to 0 by rules.
+            # For simplicity, we can use the overall average unit area from historical data if needed.
+            
+            # Calculate an average unit area for this specific project based on predicted house types
+            weighted_avg_unit_area = 0
+            if predicted_units['ทาวโฮม'] > 0: weighted_avg_unit_area += predicted_units['ทาวโฮม'] * AREA_TH
+            if predicted_units['บ้านแฝด'] > 0: weighted_avg_unit_area += predicted_units['บ้านแฝด'] * AREA_BA
+            if predicted_units['บ้านเดี่ยว'] > 0: weighted_avg_unit_area += predicted_units['บ้านเดี่ยว'] * AREA_BD
+            
+            total_current_estimated_units = sum(predicted_units.values())
+
+            if total_current_estimated_units > 0 and predicted_distributable_area > 0 and weighted_avg_unit_area > 0:
+                # Calculate what proportion of total_area_consumed came from our known unit types
+                known_types_total_units = predicted_units['ทาวโฮม'] + predicted_units['บ้านแฝด'] + predicted_units['บ้านเดี่ยว']
+                
+                if known_types_total_units > 0:
+                    avg_area_known_types = total_area_consumed / known_types_total_units
+                    # Scale based on distributable area for known types
+                    estimated_known_units_from_area = predicted_distributable_area / avg_area_known_types
+                    scale_factor_known = estimated_known_units_from_area / known_types_total_units if known_types_total_units > 0 else 1.0
+
+                    # Apply scale factor to known types
+                    predicted_units['ทาวโฮม'] = round(predicted_units['ทาวโฮม'] * scale_factor_known)
+                    predicted_units['บ้านแฝด'] = round(predicted_units['บ้านแฝด'] * scale_factor_known)
+                    predicted_units['บ้านเดี่ยว'] = round(predicted_units['บ้านเดี่ยว'] * scale_factor_known)
+                    
+                    # For other types, we just use the original proportion * new total if they exist
+                    # (This part is a bit tricky without their area data, assuming they are minor or fixed by rules)
+                    # If they are not 0 by rules and their proportions are available,
+                    # we can try to estimate their units based on the remaining area.
+                    
+                    # For simplicity, let's just sum up the known types for now.
+                    # A more robust model would need to account for area of บ้านเดี่ยว3ชั้น and อาคารพาณิชย์
+                    # or assume a fixed small footprint for them if they are allowed.
+                else: # No known types, distribute remaining based on estimated total
+                    for i, h_type in enumerate(remaining_house_types):
+                        predicted_units[h_type] = round(estimated_total_units * current_proportions[i])
+
+
+        total_predicted_units = sum(predicted_units.values())
+
+    else: # No specific grade rules, use average proportions for the given grade/land shape
+        if proportions_df is not None:
+            # Use specific proportions if available
+            for h_type in house_types:
+                predicted_units[h_type] = round(predicted_distributable_area * avg_units_per_dist_area * proportions_df[f'{h_type}_prop'].iloc[0])
+        else:
+            # Fallback to general average proportions if no specific (grade, land_shape) combo found
+            general_avg_props = df[[f'{h_type}_prop' for h_type in house_types]].mean()
+            for h_type in house_types:
+                predicted_units[h_type] = round(predicted_distributable_area * avg_units_per_dist_area * general_avg_props[f'{h_type}_prop'])
+
+        total_predicted_units = sum(predicted_units.values())
+        
+        # A more robust way to calculate total units given specific area per type
+        # Calculate a weighted average area per unit for this project based on predicted proportions
+        if total_predicted_units > 0:
+            # Recalculate based on proportions and known areas
+            # This is complex as it requires an iterative approach or solving for total units
+            # Given the constraints, a simpler approach is to use the average density (units/sqm)
+            # from historical data and then distribute based on proportions.
+            
+            # Let's refine based on the area consumption if possible
+            estimated_total_area_consumed_by_units = 0
+            if predicted_units['ทาวโฮม'] > 0: estimated_total_area_consumed_by_units += predicted_units['ทาวโฮม'] * AREA_TH
+            if predicted_units['บ้านแฝด'] > 0: estimated_total_area_consumed_by_units += predicted_units['บ้านแฝด'] * AREA_BA
+            if predicted_units['บ้านเดี่ยว'] > 0: estimated_total_area_consumed_by_units += predicted_units['บ้านเดี่ยว'] * AREA_BD
+
+            # If the calculated consumed area is much different from distributable, scale units
+            if estimated_total_area_consumed_by_units > 0:
+                scale_factor_area = predicted_distributable_area / estimated_total_area_consumed_by_units
+                for h_type in ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว']: # Apply only to types with known area
+                    predicted_units[h_type] = round(predicted_units[h_type] * scale_factor_area)
+                total_predicted_units = sum(predicted_units.values()) # Recalculate total units
+
+
+    # 3. Predict Number of Alleys (จำนวนซอย)
+    predicted_alleys = 0
+    if total_predicted_units > 0:
+        predicted_alleys = round(total_predicted_units * avg_alley_per_unit)
+    elif predicted_distributable_area > 0:
+        predicted_alleys = round(predicted_distributable_area * avg_alley_per_dist_area)
+    
+    # Ensure alleys are at least 1 for any project, maybe more if very large
+    predicted_alleys = max(1, predicted_alleys) # At least one alley for a project. Could refine this rule.
+
 
     return {
-        'พื้นที่โครงการ (ตร.วา)': round(project_area_wah, 2),
-        'พื้นที่สาธารณะ': round(public_area, 2),
-        'พื้นที่จัดจำหน่าย': round(dist_area, 2),
-        'พื้นที่สวน': round(garden_area, 2),
-        'พื้นที่ถนน': round(road_area, 2),
-        **{f'จำนวนแปลง ({k})': v for k, v in result.items() if k != 'รวม' and k != 'ซอย'},
-        'จำนวนแปลง (รวม)': result['รวม'],
-        'จำนวนซอย': result['ซอย']
+        'พื้นที่โครงการ': round(project_area_sqm, 2),
+        'พื้นที่สาธา': round(predicted_public_area, 2),
+        'พื้นที่จัดจำหน่าย': round(predicted_distributable_area, 2),
+        'พื้นที่สวน': round(predicted_garden_area, 2),
+        'พื้นที่ถนนรวม': round(predicted_road_area, 2),
+        'จำนวนแปลง (ทาวน์โฮม)': predicted_units['ทาวโฮม'],
+        'จำนวนแปลง (บ้านแฝด)': predicted_units['บ้านแฝด'],
+        'จำนวนแปลง (บ้านเดี่ยว)': predicted_units['บ้านเดี่ยว'],
+        'จำนวนแปลง (บ้านเดี่ยว3ชั้น)': predicted_units['บ้านเดี่ยว3ชั้น'],
+        'จำนวนแปลง (อาคารพาณิชย์)': predicted_units['อาคารพาณิชย์'],
+        'จำนวนแปลง (รวม)': total_predicted_units,
+        'จำนวนซอย': predicted_alleys
     }
-
-# UI
-st.title("📐 Smart Layout AI")
-st.subheader("ระบบพยากรณ์ผังจัดสรร")
-
-with st.form("input"):
-    area_input = st.number_input("กรอกพื้นที่โครงการ (หน่วย: ตร.วา)", min_value=1.0, value=10000.0)
-    grade_input = st.selectbox("เลือกเกรดโครงการ", sorted(df['เกรดโครงการ'].unique()))
-    shape_input = st.selectbox("เลือกรูปร่างที่ดิน", sorted(df['รูปร่างที่ดิน'].unique()))
-    submitted = st.form_submit_button("พยากรณ์")
-
-if submitted:
-    out = predict(area_input, grade_input, shape_input)
-    st.subheader("📊 ผลลัพธ์การพยากรณ์")
-    for k, v in out.items():
-        st.write(f"{k}: {v}")
-
-    st.divider()
-    # Accuracy placeholder
-    actual = df['total_units']
-    pred = df['พื้นที่จัดจำหน่าย(ตรม)'] * avg_units_per_dist_area
-    mep = np.mean(np.abs(actual - pred) / np.where(actual != 0, actual, 1)) * 100
-    r2 = r2_score(actual, pred)
-    st.metric("MEP (Mean Error %)", f"{mep:.2f}%")
-    st.metric("R² Score", f"{r2:.4f}")
