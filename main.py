@@ -1,18 +1,63 @@
+คุณกำลังพบข้อผิดพลาดที่ไม่ปกติเลยครับ: 'str' object has no attribute 'xlsx' ในระหว่างการโหลดไฟล์ CSV ด้วย pd.read_csv
+
+ข้อความผิดพลาดนี้มักจะเกิดขึ้นเมื่อโปรแกรมพยายามจัดการไฟล์ Excel (.xlsx) แต่กลับได้รับข้อมูลในรูปแบบของสตริงที่ไม่ถูกต้อง ซึ่งโดยปกติแล้วไม่ควรเกิดขึ้นกับ pd.read_csv
+
+ข้อผิดพลาดนี้ชี้ให้เห็นว่าอาจมีปัญหาเกี่ยวกับตัวไฟล์ข้อมูลเอง หรือสภาพแวดล้อมที่รันโค้ดครับ
+
+สาเหตุที่เป็นไปได้และวิธีแก้ไข:
+
+ไฟล์ layoutdata.xlsx - Sheet1.csv ไม่ใช่ไฟล์ CSV จริงๆ:
+
+ตรวจสอบ: ลองเปิดไฟล์ layoutdata.xlsx - Sheet1.csv ด้วยโปรแกรมแก้ไขข้อความธรรมดา (เช่น Notepad บน Windows, TextEdit บน Mac หรือ VS Code) ไม่ใช่ Excel
+
+ยืนยัน: ดูว่าเนื้อหาภายในไฟล์นั้นเป็นข้อความที่มีค่าต่างๆ คั่นด้วยเครื่องหมายจุลภาค (comma ,) จริงๆ หรือไม่
+
+แก้ไข: หากไฟล์นั้นเป็นไฟล์ Excel จริงๆ (แม้จะเปลี่ยนชื่อเป็น .csv แล้ว) คุณต้องเปิดไฟล์นั้นด้วย Excel แล้ว บันทึกเป็น CSV (Comma delimited) อีกครั้ง โดยเลือก Save As -> CSV (Comma delimited) (.csv)
+
+ปัญหาเกี่ยวกับชื่อไฟล์:
+
+แม้ว่า pandas จะรองรับช่องว่างและเครื่องหมาย - ในชื่อไฟล์ได้ดี แต่เพื่อตัดปัญหา ลองเปลี่ยนชื่อไฟล์ให้ง่ายขึ้นชั่วคราว เช่น data.csv แล้วอัปเดตโค้ดให้ตรงกับชื่อไฟล์ใหม่
+
+ตรวจสอบอีกครั้ง: ตรวจสอบว่าคุณสะกดชื่อไฟล์ในโค้ด pd.read_csv('layoutdata.xlsx - Sheet1.csv') ตรงกับชื่อไฟล์จริงทุกประการ (รวมถึงช่องว่างและขีดกลาง)
+
+ปัญหาการเข้ารหัส (Encoding):
+
+บางครั้งไฟล์ CSV อาจมีการเข้ารหัสที่แตกต่างกัน (เช่น UTF-8, TIS-620) การระบุ encoding ใน pd.read_csv อาจช่วยได้ แม้จะไม่น่าจะเป็นสาเหตุโดยตรงของข้อผิดพลาด xlsx นี้ก็ตาม
+
+ลองเพิ่ม encoding:
+
+Python
+
+df = pd.read_csv('layoutdata.xlsx - Sheet1.csv', encoding='utf-8')
+# หรือลอง encoding='TIS-620' หากไฟล์เป็นภาษาไทยที่สร้างจากโปรแกรมเก่าๆ
+โปรดลองแก้ไขตามคำแนะนำด้านบน โดยเฉพาะข้อ 1 (การตรวจสอบและบันทึกไฟล์เป็น CSV อีกครั้ง) ซึ่งเป็นสาเหตุที่พบบ่อยที่สุดที่ทำให้เกิดข้อผิดพลาดลักษณะนี้ครับ
+
+ผมยังคงให้โค้ดฉบับเต็มล่าสุดที่คุณมีไว้ด้านล่างนี้ โดยเพิ่ม encoding='utf-8' เข้าไปให้ด้วยครับ (คุณสามารถเปลี่ยนเป็น TIS-620 หากจำเป็น)
+
+โค้ด Streamlit ฉบับเต็ม (เพิ่ม encoding และปรับปรุง): layout_predictor.py
+Python
+
 import streamlit as st
 import pandas as pd
 import numpy as np
+
+# Initialize df outside try block to ensure it always exists, even if None
+df = None
 
 # --- 1. Load Data ---
 # Load the historical data directly from the file system.
 # The file 'layoutdata.xlsx - Sheet1.csv' MUST be in the same directory as this script.
 try:
-    df = pd.read_csv('layoutdata'.xlsx)
+    # IMPORTANT: Ensure 'layoutdata.xlsx - Sheet1.csv' is a true CSV file.
+    # If it was originally an Excel file, open it in Excel and 'Save As' -> 'CSV (Comma delimited)'.
+    # Added encoding='utf-8' for robustness.
+    df = pd.read_csv('layoutdata.xlsx - Sheet1.csv', encoding='utf-8')
+    
     # Ensure column names are stripped of whitespace for consistency
     df.columns = df.columns.str.strip()
     
     # Calculate Total Units if not already present or needs recalculation based on specific columns
     required_house_cols = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
-    # FIX: Corrected syntax from 'for col col in' to 'for col in'
     existing_house_cols = [col for col in required_house_cols if col in df.columns]
 
     if existing_house_cols:
@@ -42,15 +87,15 @@ try:
 except FileNotFoundError:
     st.error("Error: ไม่พบไฟล์ 'layoutdata.xlsx - Sheet1.csv' โปรดตรวจสอบให้แน่ใจว่าไฟล์อยู่ในไดเรกทอรีเดียวกันกับสคริปต์.")
     st.stop() # Stop the app if data is not found
-except Exception as e:
+except Exception as e: # This will catch the 'str' object has no attribute 'xlsx' error
     st.error(f"เกิดข้อผิดพลาดในการโหลดหรือประมวลผลไฟล์: {e}")
     st.stop()
 
 # --- 2. Pre-calculate average ratios and proportions from historical data ---
 # Ratios for area calculations
-avg_public_area_ratio = (df['พื้นที่สาธา(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean() if 'พื้นที่สาธา(ตรม)' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns else 0.333
-avg_distributable_area_ratio = (df['พื้นที่จัดจำหน่าย(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean() if 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns else 0.667
-avg_road_area_ratio = (df['พื้นที่ถนนรวม'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean() if 'พื้นที่ถนนรวม' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns else 0.30
+avg_public_area_ratio = (df['พื้นที่สาธา(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean() if df is not None and 'พื้นที่สาธา(ตรม)' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns else 0.333
+avg_distributable_area_ratio = (df['พื้นที่จัดจำหน่าย(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean() if df is not None and 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns else 0.667
+avg_road_area_ratio = (df['พื้นที่ถนนรวม'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean() if df is not None and 'พื้นที่ถนนรวม' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns else 0.30
 
 # Average area per unit for each type (from user's request)
 AREA_TH = 5 * 16  # ทาวน์โฮม (ตรม.)
@@ -58,7 +103,7 @@ AREA_BA = 12 * 16 # บ้านแฝด (ตรม.)
 AREA_BD = 15 * 18 # บ้านเดี่ยว (ตรม.)
 
 # Average units per distributable area (overall)
-if 'จำนวนหลัง' in df.columns and 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns:
+if df is not None and 'จำนวนหลัง' in df.columns and 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns:
     avg_units_per_dist_area = (df['จำนวนหลัง'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
 else:
     avg_units_per_dist_area = 0.005 # Fallback value if columns missing or data problematic
@@ -68,8 +113,8 @@ house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเ�
 
 # Group by 'เกรดโครงการ' and 'รูปร่างที่ดิน' to get average proportions
 # Filter for only existing proportion columns before grouping
-existing_prop_cols = [f'{h_type}_prop' for h_type in house_types if f'{h_type}_prop' in df.columns]
-if 'เกรดโครงการ' in df.columns and 'รูปร่างที่ดิน' in df.columns and existing_prop_cols:
+existing_prop_cols = [f'{h_type}_prop' for h_type in house_types if f'{h_type}_prop' in df.columns] if df is not None else []
+if df is not None and 'เกรดโครงการ' in df.columns and 'รูปร่างที่ดิน' in df.columns and existing_prop_cols:
     grade_land_shape_proportions = df.groupby(['เกรดโครงการ', 'รูปร่างที่ดิน'])[existing_prop_cols].mean()
 else:
     grade_land_shape_proportions = pd.DataFrame() # Empty if not enough data
@@ -82,12 +127,12 @@ grade_rules = {
 }
 
 # Average number of alleys per total units
-if 'จำนวนซอย' in df.columns and 'จำนวนหลัง' in df.columns:
+if df is not None and 'จำนวนซอย' in df.columns and 'จำนวนหลัง' in df.columns:
     avg_alley_per_unit = (df['จำนวนซอย'] / df['จำนวนหลัง']).replace([np.inf, -np.inf], np.nan).mean()
 else:
     avg_alley_per_unit = 0.05 # Fallback (e.g. 1 alley per 20 units)
 
-if 'จำนวนซอย' in df.columns and 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns:
+if df is not None and 'จำนวนซอย' in df.columns and 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns:
     avg_alley_per_dist_area = (df['จำนวนซอย'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
 else:
     avg_alley_per_dist_area = 0.0001 # Fallback (e.g. 1 alley per 10000 sqm)
@@ -142,7 +187,7 @@ def predict_project_layout(
                 current_proportions = current_proportions_temp / current_proportions_temp.sum()
             
         if current_proportions is None or current_proportions.empty: # Fallback to general average if specific or normalized sum is zero or no data
-            general_props_temp_dict = {h: df[f'{h}_prop'].mean() for h in remaining_house_types if f'{h}_prop' in df.columns}
+            general_props_temp_dict = {h: df[f'{h}_prop'].mean() for h in remaining_house_types if f'{h}_prop' in df.columns} if df is not None else {}
             general_props_temp = pd.Series(general_props_temp_dict)
 
             if general_props_temp.sum() > 0:
@@ -181,7 +226,7 @@ def predict_project_layout(
                 current_proportions = current_proportions_temp / current_proportions_temp.sum()
         
         if current_proportions is None or current_proportions.empty: # Fallback to general average
-            general_props_temp_dict = {h: df[f'{h}_prop'].mean() for h in house_types if f'{h}_prop' in df.columns}
+            general_props_temp_dict = {h: df[f'{h}_prop'].mean() for h in house_types if f'{h}_prop' in df.columns} if df is not None else {}
             general_props_temp = pd.Series(general_props_temp_dict)
 
             if general_props_temp.sum() > 0:
@@ -244,9 +289,9 @@ st.markdown("โปรดกรอกข้อมูลสำหรับโค�
 
 # Get unique values for dropdowns from loaded data
 # Ensure columns exist before accessing unique values, provide fallback if not
-unique_land_shapes = df['รูปร่างที่ดิน'].unique().tolist() if 'รูปร่างที่ดิน' in df.columns else []
-unique_grades = df['เกรดโครงการ'].unique().tolist() if 'เกรดโครงการ' in df.columns else []
-unique_provinces = df['จังหวัด'].unique().tolist() if 'จังหวัด' in df.columns else []
+unique_land_shapes = df['รูปร่างที่ดิน'].unique().tolist() if df is not None and 'รูปร่างที่ดิน' in df.columns else []
+unique_grades = df['เกรดโครงการ'].unique().tolist() if df is not None and 'เกรดโครงการ' in df.columns else []
+unique_provinces = df['จังหวัด'].unique().tolist() if df is not None and 'จังหวัด' in df.columns else []
 
 st.header("ข้อมูลโครงการใหม่")
 col1, col2 = st.columns(2)
