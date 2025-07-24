@@ -1,21 +1,3 @@
-เข้าใจแล้วครับ! คุณต้องการให้โค้ดอ่านไฟล์ layoutdata.xlsx - Sheet1.csv โดยตรงจากไดเรกทอรีเดียวกันกับสคริปต์ ไม่ใช่อัปโหลดผ่านหน้า UI ของ Streamlit
-
-ผมได้ปรับแก้โค้ดให้กลับไปเป็นแบบที่คุณต้องการแล้วครับ โดยยังคงมีส่วนจัดการข้อผิดพลาด FileNotFoundError หากไม่พบไฟล์ และส่วน UI ของ Streamlit ที่สมบูรณ์เหมือนเดิม
-
-สิ่งสำคัญที่คุณต้องทำคือ:
-
-บันทึกโค้ด: คัดลอกโค้ดทั้งหมดนี้ไปบันทึกเป็นไฟล์ .py เช่น layout_predictor.py
-
-วางไฟล์ข้อมูล: ต้องแน่ใจว่าไฟล์ชื่อ layoutdata.xlsx - Sheet1.csv อยู่ในไดเรกทอรีเดียวกันกับไฟล์ layout_predictor.py ของคุณ ไม่เช่นนั้นจะยังคงเกิดข้อผิดพลาด FileNotFoundError เหมือนเดิมครับ
-
-รัน Streamlit App: เปิด Terminal หรือ Command Prompt ในไดเรกทอรีที่คุณบันทึกไฟล์ แล้วรันคำสั่ง:
-
-Bash
-
-streamlit run layout_predictor.py
-โค้ด Streamlit ฉบับเต็ม (ไม่ใช้การอัปโหลดไฟล์): layout_predictor.py
-Python
-
 import streamlit as st
 import pandas as pd
 import numpy as np
