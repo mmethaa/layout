@@ -12,7 +12,8 @@ try:
     
     # Calculate Total Units if not already present or needs recalculation based on specific columns
     required_house_cols = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
-    existing_house_cols = [col for col col in required_house_cols if col in df.columns]
+    # FIX: Corrected syntax from 'for col col in' to 'for col in'
+    existing_house_cols = [col for col in required_house_cols if col in df.columns]
 
     if existing_house_cols:
         df['จำนวนหลัง'] = df[existing_house_cols].sum(axis=1)
@@ -25,9 +26,8 @@ try:
     if existing_house_cols:
         df['total_houses_for_prop'] = df[existing_house_cols].sum(axis=1)
         # Handle division by zero for projects with no houses
-        df[f'{h_type}_prop'] = df[h_type] / df['total_houses_for_prop'].replace(0, np.nan)
-        for h_type in existing_house_cols:
-             df[f'{h_type}_prop'] = df[h_type] / df['total_houses_for_prop'].replace(0, np.nan) # Recalculate correctly
+        for h_type in existing_house_cols: # Loop through existing house types
+             df[f'{h_type}_prop'] = df[h_type] / df['total_houses_for_prop'].replace(0, np.nan) 
         df.fillna(0, inplace=True) # Fill NaN proportions with 0
     else:
         st.warning("ไม่พบคอลัมน์ประเภทบ้านสำหรับคำนวณสัดส่วนในไฟล์ข้อมูล.")
