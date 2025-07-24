@@ -1,73 +1,115 @@
+เข้าใจแล้วครับ! คุณต้องการให้โค้ดอ่านไฟล์ layoutdata.xlsx - Sheet1.csv โดยตรงจากไดเรกทอรีเดียวกันกับสคริปต์ ไม่ใช่อัปโหลดผ่านหน้า UI ของ Streamlit
+
+ผมได้ปรับแก้โค้ดให้กลับไปเป็นแบบที่คุณต้องการแล้วครับ โดยยังคงมีส่วนจัดการข้อผิดพลาด FileNotFoundError หากไม่พบไฟล์ และส่วน UI ของ Streamlit ที่สมบูรณ์เหมือนเดิม
+
+สิ่งสำคัญที่คุณต้องทำคือ:
+
+บันทึกโค้ด: คัดลอกโค้ดทั้งหมดนี้ไปบันทึกเป็นไฟล์ .py เช่น layout_predictor.py
+
+วางไฟล์ข้อมูล: ต้องแน่ใจว่าไฟล์ชื่อ layoutdata.xlsx - Sheet1.csv อยู่ในไดเรกทอรีเดียวกันกับไฟล์ layout_predictor.py ของคุณ ไม่เช่นนั้นจะยังคงเกิดข้อผิดพลาด FileNotFoundError เหมือนเดิมครับ
+
+รัน Streamlit App: เปิด Terminal หรือ Command Prompt ในไดเรกทอรีที่คุณบันทึกไฟล์ แล้วรันคำสั่ง:
+
+Bash
+
+streamlit run layout_predictor.py
+โค้ด Streamlit ฉบับเต็ม (ไม่ใช้การอัปโหลดไฟล์): layout_predictor.py
+Python
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 
-# --- 1. Load Data Function (modified to accept uploaded file) ---
-@st.cache_data # Cache the data loading to improve performance
-def load_data(uploaded_file):
-    if uploaded_file is not None:
-        try:
-            # Read the CSV file
-            df = pd.read_csv(uploaded_file)
-            
-            # Ensure column names are stripped of whitespace for consistency
-            df.columns = df.columns.str.strip()
-            
-            # Calculate Total Units if not already present or needs recalculation based on specific columns
-            # Ensure all relevant columns exist before summing
-            required_house_cols = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
-            # Filter for only existing house type columns in the DataFrame
-            existing_house_cols = [col for col in required_house_cols if col in df.columns]
+# --- 1. Load Data ---
+# Load the historical data directly from the file system.
+# The file 'layoutdata.xlsx - Sheet1.csv' MUST be in the same directory as this script.
+try:
+    df = pd.read_csv('layoutdata.xlsx - Sheet1.csv')
+    # Ensure column names are stripped of whitespace for consistency
+    df.columns = df.columns.str.strip()
+    
+    # Calculate Total Units if not already present or needs recalculation based on specific columns
+    required_house_cols = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
+    existing_house_cols = [col for col col in required_house_cols if col in df.columns]
 
-            if existing_house_cols:
-                df['จำนวนหลัง'] = df[existing_house_cols].sum(axis=1)
-            else:
-                st.warning("บางคอลัมน์ประเภทบ้านขาดหายไป ไม่สามารถคำนวณ 'จำนวนหลัง' ได้อย่างแม่นยำ.")
-                df['จำนวนหลัง'] = 0 # Default to 0
+    if existing_house_cols:
+        df['จำนวนหลัง'] = df[existing_house_cols].sum(axis=1)
+    else:
+        # Fallback if house type columns are missing
+        st.error("บางคอลัมน์ประเภทบ้าน (ทาวโฮม, บ้านแฝด, ฯลฯ) ขาดหายไปในไฟล์ข้อมูล. ไม่สามารถคำนวณ 'จำนวนหลัง' ได้อย่างแม่นยำ.")
+        df['จำนวนหลัง'] = 0 # Default to 0, might lead to less accurate predictions
 
-            # Calculate proportion for each house type
-            if existing_house_cols:
-                df['total_houses_for_prop'] = df[existing_house_cols].sum(axis=1)
-                for h_type in existing_house_cols:
-                    # Avoid division by zero for projects with no houses
-                    df[f'{h_type}_prop'] = df[h_type] / df['total_houses_for_prop'].replace(0, np.nan)
-                df.fillna(0, inplace=True) # Fill NaN proportions with 0 (for projects with no specific house type or total_houses_for_prop=0)
-            else:
-                st.warning("ไม่พบคอลัมน์ประเภทบ้านสำหรับคำนวณสัดส่วน.")
-            
-            # Ensure essential columns for ratios exist, otherwise fall back to defaults
-            for col in ['พื้นที่สาธา(ตรม)', 'พื้นที่โครงการ(ตรม)', 'พื้นที่จัดจำหน่าย(ตรม)', 'พื้นที่ถนนรวม', 'จำนวนซอย', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด']:
-                if col not in df.columns:
-                    st.warning(f"คอลัมน์ '{col}' ไม่พบในไฟล์ข้อมูล อาจส่งผลต่อความแม่นยำในการทำนาย.")
+    # Calculate proportion for each house type
+    if existing_house_cols:
+        df['total_houses_for_prop'] = df[existing_house_cols].sum(axis=1)
+        # Handle division by zero for projects with no houses
+        df[f'{h_type}_prop'] = df[h_type] / df['total_houses_for_prop'].replace(0, np.nan)
+        for h_type in existing_house_cols:
+             df[f'{h_type}_prop'] = df[h_type] / df['total_houses_for_prop'].replace(0, np.nan) # Recalculate correctly
+        df.fillna(0, inplace=True) # Fill NaN proportions with 0
+    else:
+        st.warning("ไม่พบคอลัมน์ประเภทบ้านสำหรับคำนวณสัดส่วนในไฟล์ข้อมูล.")
 
-            return df
-        except Exception as e:
-            st.error(f"เกิดข้อผิดพลาดในการโหลดหรือประมวลผลไฟล์: {e}")
-            st.stop()
-    return pd.DataFrame() # Return empty DataFrame if no file uploaded or error
+    # Check for essential columns for ratios and dropdowns
+    essential_cols = ['พื้นที่สาธา(ตรม)', 'พื้นที่โครงการ(ตรม)', 'พื้นที่จัดจำหน่าย(ตรม)', 
+                      'พื้นที่ถนนรวม', 'จำนวนซอย', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด']
+    for col in essential_cols:
+        if col not in df.columns:
+            st.warning(f"คำเตือน: คอลัมน์ '{col}' ไม่พบในไฟล์ข้อมูล. การทำนายบางส่วนอาจไม่แม่นยำ.")
 
-# Global variables for pre-calculated ratios and rules (initialized as defaults/empty)
-# These will be updated once the DataFrame `df` is successfully loaded and processed.
-avg_public_area_ratio = 0.333
-avg_distributable_area_ratio = 0.667
-avg_road_area_ratio = 0.30
-avg_units_per_dist_area = 0.005
-avg_alley_per_unit = 0.05
-avg_alley_per_dist_area = 0.0001
-grade_land_shape_proportions = pd.DataFrame() 
+except FileNotFoundError:
+    st.error("Error: ไม่พบไฟล์ 'layoutdata.xlsx - Sheet1.csv' โปรดตรวจสอบให้แน่ใจว่าไฟล์อยู่ในไดเรกทอรีเดียวกันกับสคริปต์.")
+    st.stop() # Stop the app if data is not found
+except Exception as e:
+    st.error(f"เกิดข้อผิดพลาดในการโหลดหรือประมวลผลไฟล์: {e}")
+    st.stop()
+
+# --- 2. Pre-calculate average ratios and proportions from historical data ---
+# Ratios for area calculations
+avg_public_area_ratio = (df['พื้นที่สาธา(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean() if 'พื้นที่สาธา(ตรม)' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns else 0.333
+avg_distributable_area_ratio = (df['พื้นที่จัดจำหน่าย(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean() if 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns else 0.667
+avg_road_area_ratio = (df['พื้นที่ถนนรวม'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean() if 'พื้นที่ถนนรวม' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns else 0.30
 
 # Average area per unit for each type (from user's request)
-AREA_TH = 5 * 16  # ทาวน์โฮม
-AREA_BA = 12 * 16 # บ้านแฝด
-AREA_BD = 15 * 18 # บ้านเดี่ยว
+AREA_TH = 5 * 16  # ทาวน์โฮม (ตรม.)
+AREA_BA = 12 * 16 # บ้านแฝด (ตรม.)
+AREA_BD = 15 * 18 # บ้านเดี่ยว (ตรม.)
 
+# Average units per distributable area (overall)
+if 'จำนวนหลัง' in df.columns and 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns:
+    avg_units_per_dist_area = (df['จำนวนหลัง'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
+else:
+    avg_units_per_dist_area = 0.005 # Fallback value if columns missing or data problematic
+
+# House types list for iteration
 house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
+
+# Group by 'เกรดโครงการ' and 'รูปร่างที่ดิน' to get average proportions
+# Filter for only existing proportion columns before grouping
+existing_prop_cols = [f'{h_type}_prop' for h_type in house_types if f'{h_type}_prop' in df.columns]
+if 'เกรดโครงการ' in df.columns and 'รูปร่างที่ดิน' in df.columns and existing_prop_cols:
+    grade_land_shape_proportions = df.groupby(['เกรดโครงการ', 'รูปร่างที่ดิน'])[existing_prop_cols].mean()
+else:
+    grade_land_shape_proportions = pd.DataFrame() # Empty if not enough data
 
 # Rules for specific grades (based on initial observation)
 grade_rules = {
     'LUXURY': {'ทาวโฮม': 0, 'บ้านแฝด': 0, 'บ้านเดี่ยว3ชั้น': 0, 'อาคารพาณิชย์': 0}, # Only บ้านเดี่ยว
     'PREMIUM': {'ทาวโฮม': 0, 'บ้านเดี่ยว3ชั้น': 0, 'อาคารพาณิชย์': 0} # Mostly บ้านเดี่ยว, some บ้านแฝด possible
+    # Add other grade rules if identified
 }
+
+# Average number of alleys per total units
+if 'จำนวนซอย' in df.columns and 'จำนวนหลัง' in df.columns:
+    avg_alley_per_unit = (df['จำนวนซอย'] / df['จำนวนหลัง']).replace([np.inf, -np.inf], np.nan).mean()
+else:
+    avg_alley_per_unit = 0.05 # Fallback (e.g. 1 alley per 20 units)
+
+if 'จำนวนซอย' in df.columns and 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns:
+    avg_alley_per_dist_area = (df['จำนวนซอย'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
+else:
+    avg_alley_per_dist_area = 0.0001 # Fallback (e.g. 1 alley per 10000 sqm)
+
 
 # --- 3. Prediction Function ---
 def predict_project_layout(
@@ -79,10 +121,6 @@ def predict_project_layout(
     """
     Predicts various layout metrics for a new project based on historical data.
     """
-    # Use global variables which are updated after df is loaded
-    global avg_public_area_ratio, avg_distributable_area_ratio, avg_road_area_ratio
-    global avg_units_per_dist_area, avg_alley_per_unit, avg_alley_per_dist_area
-    global grade_land_shape_proportions, grade_rules, house_types
 
     # 1. Predict Area Allocations
     predicted_public_area = project_area_sqm * avg_public_area_ratio
@@ -110,7 +148,7 @@ def predict_project_layout(
         for h_type, value in grade_rules[project_grade].items():
             predicted_units[h_type] = value
         
-        remaining_house_types = [h for h in house_types if h not in grade_rules[project_grade] and f'{h}_prop' in grade_land_shape_proportions.columns]
+        remaining_house_types = [h for h in house_types if h not in grade_rules[project_grade]]
         
         current_proportions = None
         if proportions_series is not None:
@@ -220,139 +258,91 @@ st.set_page_config(
 )
 
 st.title("🏡 การทำนายผังโครงการใหม่")
-st.markdown("โปรดอัปโหลดไฟล์ `layoutdata.xlsx - Sheet1.csv` และกรอกข้อมูลสำหรับโครงการใหม่เพื่อรับการทำนายผังและจำนวนบ้าน.")
+st.markdown("โปรดกรอกข้อมูลสำหรับโครงการใหม่เพื่อรับการทำนายผังและจำนวนบ้าน. (ไฟล์ข้อมูล `layoutdata.xlsx - Sheet1.csv` ต้องอยู่ในไดเรกทอรีเดียวกับสคริปต์นี้)")
 
-# File Uploader
-uploaded_file = st.file_uploader("อัปโหลดไฟล์ 'layoutdata.xlsx - Sheet1.csv'", type="csv")
+# Get unique values for dropdowns from loaded data
+# Ensure columns exist before accessing unique values, provide fallback if not
+unique_land_shapes = df['รูปร่างที่ดิน'].unique().tolist() if 'รูปร่างที่ดิน' in df.columns else []
+unique_grades = df['เกรดโครงการ'].unique().tolist() if 'เกรดโครงการ' in df.columns else []
+unique_provinces = df['จังหวัด'].unique().tolist() if 'จังหวัด' in df.columns else []
 
-# Only proceed if a file is uploaded
-if uploaded_file is not None:
-    df = load_data(uploaded_file)
-    
-    if not df.empty:
-        # --- Update global variables after data is loaded and processed ---
-        # This block ensures that the pre-calculated averages and proportions
-        # use the data from the *uploaded* file.
-        
-        # Ensure column names are stripped for consistency if not already done in load_data
-        df.columns = df.columns.str.strip()
+st.header("ข้อมูลโครงการใหม่")
+col1, col2 = st.columns(2)
 
-        # Ratios for area calculations
-        if 'พื้นที่สาธา(ตรม)' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns:
-            avg_public_area_ratio = (df['พื้นที่สาธา(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
-        
-        if 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns:
-            avg_distributable_area_ratio = (df['พื้นที่จัดจำหน่าย(ตรม)'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
-        
-        if 'พื้นที่ถนนรวม' in df.columns and 'พื้นที่โครงการ(ตรม)' in df.columns:
-            avg_road_area_ratio = (df['พื้นที่ถนนรวม'] / df['พื้นที่โครงการ(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
-        
-        # Total Units for avg_units_per_dist_area
-        required_house_cols = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
-        existing_house_cols_for_total = [col for col in required_house_cols if col in df.columns]
-        if existing_house_cols_for_total:
-            df['Calculated_Total_Units'] = df[existing_house_cols_for_total].sum(axis=1)
-            if 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns:
-                avg_units_per_dist_area = (df['Calculated_Total_Units'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
-        
-        # Proportions of house types by Grade and Land Shape
-        existing_house_cols_for_prop = [h for h in house_types if h in df.columns]
-        if existing_house_cols_for_prop and 'total_houses_for_prop' in df.columns and 'เกรดโครงการ' in df.columns and 'รูปร่างที่ดิน' in df.columns:
-            grade_land_shape_proportions = df.groupby(['เกรดโครงการ', 'รูปร่างที่ดิน'])[
-                [f'{h_type}_prop' for h_type in existing_house_cols_for_prop if f'{h_type}_prop' in df.columns]
-            ].mean()
-        
-        # Average number of alleys
-        if 'จำนวนซอย' in df.columns and 'Calculated_Total_Units' in df.columns:
-            avg_alley_per_unit = (df['จำนวนซอย'] / df['Calculated_Total_Units']).replace([np.inf, -np.inf], np.nan).mean()
-        if 'จำนวนซอย' in df.columns and 'พื้นที่จัดจำหน่าย(ตรม)' in df.columns:
-            avg_alley_per_dist_area = (df['จำนวนซอย'] / df['พื้นที่จัดจำหน่าย(ตรม)']).replace([np.inf, -np.inf], np.nan).mean()
-        
-        st.success("ไฟล์ข้อมูลถูกโหลดและประมวลผลเรียบร้อยแล้ว!")
+with col1:
+    project_area = st.number_input(
+        "พื้นที่โครงการ (ตรม.)",
+        min_value=1000.0,
+        max_value=1000000.0,
+        value=50000.0,
+        step=1000.0,
+        help="ป้อนพื้นที่รวมของโครงการใหม่เป็นตารางเมตร"
+    )
 
-        # Get unique values for dropdowns from loaded data
-        unique_land_shapes = df['รูปร่างที่ดิน'].unique().tolist() if 'รูปร่างที่ดิน' in df.columns else []
-        unique_grades = df['เกรดโครงการ'].unique().tolist() if 'เกรดโครงการ' in df.columns else []
-        unique_provinces = df['จังหวัด'].unique().tolist() if 'จังหวัด' in df.columns else []
-
-        st.header("ข้อมูลโครงการใหม่")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            project_area = st.number_input(
-                "พื้นที่โครงการ (ตรม.)",
-                min_value=1000.0,
-                max_value=1000000.0,
-                value=50000.0,
-                step=1000.0,
-                help="ป้อนพื้นที่รวมของโครงการใหม่เป็นตารางเมตร"
-            )
-
-        with col2:
-            if unique_land_shapes:
-                land_shape = st.selectbox(
-                    "รูปร่างที่ดิน",
-                    options=unique_land_shapes,
-                    help="เลือกรูปร่างที่ดินของโครงการใหม่"
-                )
-            else:
-                st.warning("ไม่พบข้อมูลรูปร่างที่ดินในไฟล์. โปรดตรวจสอบคอลัมน์ 'รูปร่างที่ดิน'.")
-                land_shape = "" # Default empty if no data
-
-        col3, col4 = st.columns(2)
-        with col3:
-            if unique_grades:
-                project_grade = st.selectbox(
-                    "เกรดโครงการ",
-                    options=unique_grades,
-                    help="เลือกเกรดของโครงการ (เช่น PREMIUM, LUXURY, BELLA)"
-                )
-            else:
-                st.warning("ไม่พบข้อมูลเกรดโครงการในไฟล์. โปรดตรวจสอบคอลัมน์ 'เกรดโครงการ'.")
-                project_grade = "" # Default empty if no data
-
-        with col4:
-            if unique_provinces:
-                province = st.selectbox(
-                    "จังหวัด",
-                    options=unique_provinces,
-                    help="เลือกจังหวัดที่โครงการตั้งอยู่ (ปัจจุบันไม่ได้ใช้ในการคำนวณโดยตรง)"
-                )
-            else:
-                st.warning("ไม่พบข้อมูลจังหวัดในไฟล์. โปรดตรวจสอบคอลัมน์ 'จังหวัด'.")
-                province = "" # Default empty if no data
-
-        if st.button("ทำนายผังโครงการ"):
-            if project_area <= 0:
-                st.error("กรุณาป้อน 'พื้นที่โครงการ' ที่มากกว่า 0.")
-            elif not land_shape or not project_grade:
-                st.error("กรุณาเลือก 'รูปร่างที่ดิน' และ 'เกรดโครงการ'.")
-            else:
-                # Perform prediction
-                with st.spinner("กำลังคำนวณ..."):
-                    predicted_results = predict_project_layout(
-                        project_area_sqm=project_area,
-                        land_shape=land_shape,
-                        project_grade=project_grade,
-                        province=province
-                    )
-                
-                st.success("ทำนายผลสำเร็จ!")
-                st.header("ผลการทำนาย")
-                
-                # Display results in an organized way (e.g., using st.metric or a DataFrame)
-                results_df = pd.DataFrame(predicted_results.items(), columns=["ตัวชี้วัด", "ค่าที่ทำนาย"])
-                st.dataframe(results_df, hide_index=True)
-
-                st.markdown("""
-                ---
-                **หมายเหตุ:**
-                * การทำนายนี้ใช้ค่าเฉลี่ยและสัดส่วนจากข้อมูลในอดีต.
-                * สำหรับบ้านเดี่ยว 3 ชั้น และอาคารพาณิชย์ ไม่ได้มีการกำหนดพื้นที่มาตรฐานต่อหลัง ทำให้การคำนวณจำนวนแปลงอาจไม่แม่นยำเท่าทาวน์โฮม บ้านแฝด และบ้านเดี่ยว.
-                * 'จำนวนแปลง (รวม)' คือผลรวมของบ้านทุกประเภท.
-                * 'จำนวนซอย' มีค่าต่ำสุดที่ 1.
-                """)
+with col2:
+    if unique_land_shapes:
+        land_shape = st.selectbox(
+            "รูปร่างที่ดิน",
+            options=unique_land_shapes,
+            help="เลือกรูปร่างที่ดินของโครงการใหม่"
+        )
     else:
-        st.warning("ไม่สามารถประมวลผลไฟล์ที่อัปโหลดได้ โปรดตรวจสอบรูปแบบไฟล์ CSV และคอลัมน์ที่จำเป็น.")
-else:
-    st.info("กรุณาอัปโหลดไฟล์ 'layoutdata.xlsx - Sheet1.csv' เพื่อเริ่มต้น.")
+        st.error("ไม่พบข้อมูล 'รูปร่างที่ดิน' ในไฟล์ข้อมูล. โปรดตรวจสอบคอลัมน์นี้.")
+        land_shape = "" # Default to empty if no data
+
+col3, col4 = st.columns(2)
+with col3:
+    if unique_grades:
+        project_grade = st.selectbox(
+            "เกรดโครงการ",
+            options=unique_grades,
+            help="เลือกเกรดของโครงการ (เช่น PREMIUM, LUXURY, BELLA)"
+        )
+    else:
+        st.error("ไม่พบข้อมูล 'เกรดโครงการ' ในไฟล์ข้อมูล. โปรดตรวจสอบคอลัมน์นี้.")
+        project_grade = "" # Default to empty if no data
+
+with col4:
+    if unique_provinces:
+        province = st.selectbox(
+            "จังหวัด",
+            options=unique_provinces,
+            help="เลือกจังหวัดที่โครงการตั้งอยู่ (ปัจจุบันไม่ได้ใช้ในการคำนวณโดยตรง)"
+        )
+    else:
+        st.warning("ไม่พบข้อมูล 'จังหวัด' ในไฟล์ข้อมูล. ช่องนี้จะไม่มีผลต่อการคำนวณ.")
+        province = "N/A" # Default to N/A if no data
+
+if st.button("ทำนายผังโครงการ"):
+    # Basic validation for essential inputs
+    if project_area <= 0:
+        st.error("กรุณาป้อน 'พื้นที่โครงการ' ที่มากกว่า 0.")
+    elif not land_shape: # Check if land_shape is empty string due to missing column
+        st.error("ไม่สามารถทำนายได้: ไม่มีข้อมูล 'รูปร่างที่ดิน' ให้เลือก. โปรดตรวจสอบไฟล์ข้อมูลของคุณ.")
+    elif not project_grade: # Check if project_grade is empty string due to missing column
+        st.error("ไม่สามารถทำนายได้: ไม่มีข้อมูล 'เกรดโครงการ' ให้เลือก. โปรดตรวจสอบไฟล์ข้อมูลของคุณ.")
+    else:
+        # Perform prediction
+        with st.spinner("กำลังคำนวณ..."):
+            predicted_results = predict_project_layout(
+                project_area_sqm=project_area,
+                land_shape=land_shape,
+                project_grade=project_grade,
+                province=province
+            )
+        
+        st.success("ทำนายผลสำเร็จ!")
+        st.header("ผลการทำนาย")
+        
+        # Display results in an organized way (e.g., using st.metric or a DataFrame)
+        results_df = pd.DataFrame(predicted_results.items(), columns=["ตัวชี้วัด", "ค่าที่ทำนาย"])
+        st.dataframe(results_df, hide_index=True)
+
+        st.markdown("""
+        ---
+        **หมายเหตุ:**
+        * การทำนายนี้ใช้ค่าเฉลี่ยและสัดส่วนจากข้อมูลในอดีต.
+        * สำหรับบ้านเดี่ยว 3 ชั้น และอาคารพาณิชย์ ไม่ได้มีการกำหนดพื้นที่มาตรฐานต่อหลัง ทำให้การคำนวณจำนวนแปลงอาจไม่แม่นยำเท่าทาวน์โฮม บ้านแฝด และบ้านเดี่ยว.
+        * 'จำนวนแปลง (รวม)' คือผลรวมของบ้านทุกประเภท.
+        * 'จำนวนซอย' มีค่าต่ำสุดที่ 1.
+        """)
