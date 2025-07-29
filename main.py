@@ -10,10 +10,10 @@ from sklearn.metrics import mean_absolute_error, r2_score
 
 # --- 1. Load Data ---
 try:
-    df = pd.read_csv('layoutdata.xlsx - Sheet1.csv')
+    df = pd.read_csv('layoutdata.xlsx - Sheet1.xlsx')
     df.columns = df.columns.str.strip()
 except FileNotFoundError:
-    st.error("ไม่พบไฟล์ layoutdata.xlsx - Sheet1.csv")
+    st.error("ไม่พบไฟล์ layoutdata.xlsx - Sheet1.xlsx")
     st.stop()
 
 # --- 2. Unit Conversion (sqm ➝ sq. wah) ---
