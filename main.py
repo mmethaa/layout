@@ -1,3 +1,5 @@
+Python
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,7 +9,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, r2_score
-import xgboost as xgb # เพิ่ม import xgboost เข้ามา
+# import xgboost as xgb # เพิ่ม import xgboost เข้ามา - Removed as per user's error
 
 # --- Streamlit UI: File Uploader ---
 st.title("📐 Smart Layout Predictor (ML Powered)")
@@ -77,16 +79,11 @@ if df is not None:
     sale_price_th = st.sidebar.number_input("ทาวโฮม", value=2_500_000, step=100_000, key='sale_th')
     sale_price_ba = st.sidebar.number_input("บ้านแฝด", value=4_000_000, step=100_000, key='sale_ba')
     sale_price_bd = st.sidebar.number_input("บ้านเดี่ยว", value=6_000_000, step=100_000, key='sale_bd')
-    # ลบ บ้านเดี่ยว3ชั้น และ อาคารพาณิชย์ ออก
-    # sale_price_bd3 = st.sidebar.number_input("บ้านเดี่ยว3ชั้น", value=8_000_000, step=100_000, key='sale_bd3')
-    # sale_price_ap = st.sidebar.number_input("อาคารพาณิชย์", value=5_000_000, step=100_000, key='sale_ap')
 
     sale_price_per_unit = {
         'ทาวโฮม': sale_price_th,
         'บ้านแฝด': sale_price_ba,
         'บ้านเดี่ยว': sale_price_bd,
-        # 'บ้านเดี่ยว3ชั้น': sale_price_bd3,
-        # 'อาคารพาณิชย์': sale_price_ap
     }
 
     # ต้นทุนก่อสร้างต่อหลัง (เฉลี่ย)
@@ -94,16 +91,11 @@ if df is not None:
     cost_th = st.sidebar.number_input("ทาวโฮม_Cost", value=1_500_000, step=50_000, key='cost_th')
     cost_ba = st.sidebar.number_input("บ้านแฝด_Cost", value=2_500_000, step=50_000, key='cost_ba')
     cost_bd = st.sidebar.number_input("บ้านเดี่ยว_Cost", value=3_500_000, step=50_000, key='cost_bd')
-    # ลบ บ้านเดี่ยว3ชั้น และ อาคารพาณิชย์ ออก
-    # cost_bd3 = st.sidebar.number_input("บ้านเดี่ยว3ชั้น_Cost", value=5_000_000, step=50_000, key='cost_bd3')
-    # cost_ap = st.sidebar.number_input("อาคารพาณิชย์_Cost", value=3_000_000, step=50_000, key='cost_ap')
 
     construction_cost_per_unit = {
         'ทาวโฮม': cost_th,
         'บ้านแฝด': cost_ba,
         'บ้านเดี่ยว': cost_bd,
-        # 'บ้านเดี่ยว3ชั้น': cost_bd3,
-        # 'อาคารพาณิชย์': cost_ap
     }
 
     # ต้นทุนที่ดินและพัฒนาอื่นๆ (ค่าต่อ ตร.วา และ % ของรายได้รวม)
@@ -167,12 +159,13 @@ if df is not None:
 
     # --- 5. Model Training ---
     st.sidebar.subheader("ตัวเลือกโมเดล")
-    model_type = st.sidebar.selectbox("เลือกประเภทโมเดล", ["RandomForestRegressor", "XGBRegressor"])
+    # model_type = st.sidebar.selectbox("เลือกประเภทโมเดล", ["RandomForestRegressor", "XGBRegressor"]) # Removed XGBRegressor
+    model_type = st.sidebar.selectbox("เลือกประเภทโมเดล", ["RandomForestRegressor"]) # Only RandomForestRegressor available
 
     if model_type == "RandomForestRegressor":
         regressor = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)
-    elif model_type == "XGBRegressor":
-        regressor = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=200, random_state=42, n_jobs=-1)
+    # elif model_type == "XGBRegressor": # Removed XGBRegressor
+    #     regressor = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=200, random_state=42, n_jobs=-1)
 
     model = Pipeline(steps=[('preprocessor', preprocessor),
                             ('regressor', regressor)
@@ -398,4 +391,4 @@ if df is not None:
         st.subheader("🔍 ผลการทำนายจาก ML (โครงการเฉพาะ)")
         st.dataframe(pd.DataFrame(result_ml.items(), columns=['รายการ', 'ค่าทำนาย']), use_container_width=True)
 
-        st.info("โปรดทราบ: ค่า MAE และ R² ที่แสดงในแถบด้านข้างคือประสิทธิภาพของโมเดลบนข้อมูลทดสอบ ไม่ใช่ผลลัพธ์จากการทำนายเดี่ยวๆ นี้")
+        st.info("โปรดทราบ: ค่า MAE และ R² ที่แสดงในแถบด้านข้างคือประสิทธิภาพของโมเดลบนข้อมูลทดสอบ ไม่ใช่ผลลัพธ์จากการทำนายเดี่ยว
