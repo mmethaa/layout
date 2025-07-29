@@ -125,15 +125,15 @@ if df is not None:
         st.error("ไม่พบ Targets ที่ใช้ในการเทรนโมเดล โปรดตรวจสอบชื่อคอลัมน์ในไฟล์ข้อมูลที่อัปโหลด")
         st.stop()
 
-    X = df[features]
-    y = df[targets]
+    X = df[features].copy() # Use .copy() to avoid SettingWithCopyWarning
+    y = df[targets].copy() # Use .copy() to avoid SettingWithCopyWarning
 
     # Handle potential missing categorical values in input data (fill with mode for training)
     for col in ['รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด']:
         if col in X.columns:
             if X[col].isnull().any():
                 mode_val = X[col].mode()[0]
-                X[col] = X[col].fillna(mode_val)
+                X.loc[:, col] = X[col].fillna(mode_val) # Use .loc for assignment
                 st.sidebar.info(f"Filled missing values in '{col}' with mode: {mode_val}")
     
     # Handle potential missing numerical values (e.g., in พื้นที่โครงการ(ตรม) if any)
@@ -141,7 +141,7 @@ if df is not None:
         if col in X.columns:
             if X[col].isnull().any():
                 mean_val = X[col].mean()
-                X[col] = X[col].fillna(mean_val)
+                X.loc[:, col] = X[col].fillna(mean_val) # Use .loc for assignment
                 st.sidebar.info(f"Filled missing values in '{col}' with mean: {mean_val:.2f}")
 
     categorical_features = [col for col in ['รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด'] if col in X.columns]
@@ -157,13 +157,10 @@ if df is not None:
 
     # --- 5. Model Training ---
     st.sidebar.subheader("ตัวเลือกโมเดล")
-    # model_type = st.sidebar.selectbox("เลือกประเภทโมเดล", ["RandomForestRegressor", "XGBRegressor"]) # Removed XGBRegressor
     model_type = st.sidebar.selectbox("เลือกประเภทโมเดล", ["RandomForestRegressor"]) # Only RandomForestRegressor available
 
     if model_type == "RandomForestRegressor":
         regressor = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)
-    # elif model_type == "XGBRegressor": # Removed XGBRegressor
-    #     regressor = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=200, random_state=42, n_jobs=-1)
 
     model = Pipeline(steps=[('preprocessor', preprocessor),
                             ('regressor', regressor)
@@ -352,7 +349,7 @@ if df is not None:
     # ใช้ key ที่ไม่ซ้ำกันสำหรับ selectbox ในส่วนนี้
     project_area_input = st.number_input("พื้นที่โครงการ (ตร.วา)",
                                          min_value=float(X['พื้นที่โครงการ(ตรม)'].min()) if 'พื้นที่โครงการ(ตรม)' in X.columns and not X['พื้นที่โครงการ(ตรม)'].empty else 1000.0,
-                                         max_value=float(X['พื้นที่โครงการ(ตรม)'].max()) if 'พื้นที่โครงการ(ตรม)' in X.columns and not X['พื้นที่โครงการ(ตร.ม)'].empty else 100000.0,
+                                         max_value=float(X['พื้นที่โครงการ(ตรม)'].max()) if 'พื้นที่โครงการ(ตรม)' in X.columns and not X['พื้นที่โครงการ(ตรม)'].empty else 100000.0, # Corrected typo here
                                          value=float(X['พื้นที่โครงการ(ตรม)'].mean()) if 'พื้นที่โครงการ(ตรม)' in X.columns and not X['พื้นที่โครงการ(ตรม)'].empty else 40000.0,
                                          step=500.0, key='single_predict_project_area')
 
