@@ -12,9 +12,6 @@ import joblib
 import os
 import requests
 import json
-import base64
-import io
-import wave
 from matplotlib import font_manager as fm
 
 # --- API Configuration ---
@@ -73,26 +70,6 @@ def call_gemini_api(prompt):
         st.error(f"เกิดข้อผิดพลาดที่ไม่คาดคิด: {e}")
         return "ไม่สามารถสร้างสรุปได้ เนื่องจากเกิดข้อผิดพลาดที่ไม่คาดคิด"
 
-def pcm_to_wav(pcm_data, sample_rate=16000):
-    """
-    Converts raw PCM audio data (bytes) into a WAV format blob.
-    
-    Args:
-        pcm_data (bytes): The raw PCM audio data.
-        sample_rate (int): The sample rate of the audio.
-    
-    Returns:
-        bytes: A bytes object containing the WAV file data.
-    """
-    with io.BytesIO() as wav_file:
-        wav_writer = wave.open(wav_file, 'wb')
-        wav_writer.setnchannels(1)  # Mono
-        wav_writer.setsampwidth(2)   # 16-bit
-        wav_writer.setframerate(sample_rate)
-        wav_writer.writeframes(pcm_data)
-        wav_writer.close()
-        return wav_file.getvalue()
-
 def plot_area_pie_chart(data, labels):
     """
     Generates and displays a pie chart for area breakdown.
@@ -102,17 +79,29 @@ def plot_area_pie_chart(data, labels):
     ax.axis('equal') # Equal aspect ratio ensures that pie is drawn as a circle.
     st.pyplot(fig)
 
-def plot_house_bar_chart(data, labels):
+# UPDATED: This function now dynamically generates a bar chart for all house types with non-zero counts.
+def plot_house_bar_chart(result_ml, house_types_list):
     """
-    Generates and displays a bar chart for house types.
+    Generates and displays a bar chart for house types with non-zero counts.
     """
-    fig, ax = plt.subplots()
-    ax.bar(labels, data, color=['#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd'])
-    ax.set_ylabel('จำนวนแปลง')
-    ax.set_title('จำนวนแปลงบ้านแต่ละประเภท')
-    st.pyplot(fig)
+    house_data = []
+    house_labels = []
+    for h_type in house_types_list:
+        count = result_ml.get(f'จำนวนแปลง ({h_type})', 0)
+        if count > 0:
+            house_data.append(count)
+            house_labels.append(h_type)
 
-# NEW: This function will check and correct house type predictions based on historical data.
+    if house_data:
+        fig, ax = plt.subplots()
+        ax.bar(house_labels, house_data, color=['#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd', '#f97316'])
+        ax.set_ylabel('จำนวนแปลง')
+        ax.set_title('จำนวนแปลงบ้านแต่ละประเภท')
+        st.pyplot(fig)
+    else:
+        st.warning("ไม่มีข้อมูลจำนวนแปลงบ้านที่ทำนายได้")
+
+# This function checks and corrects house type predictions based on historical data.
 def get_historically_present_house_types(df, grade_input):
     """
     Checks the original dataframe to see which house types are actually present for a given grade.
@@ -126,7 +115,7 @@ def get_historically_present_house_types(df, grade_input):
             present_house_types.add(h_type)
     return present_house_types
 
-# Updated predict_and_analyze function to include the correction logic
+# Corrected predict_and_analyze function
 def predict_and_analyze(project_area, land_shape, grade, province, ml_model, house_types_list, target_cols,
                         sale_prices, construct_costs, land_cost_sqwah, other_dev_ratio,
                         unit_standard_area_sqwah_dict, df_original):
@@ -139,7 +128,8 @@ def predict_and_analyze(project_area, land_shape, grade, province, ml_model, hou
 
     # Get the initial prediction from the ML model
     predicted_values = ml_model.predict(input_data)[0]
-    predicted_dict = {target: value for target, target_value in zip(target_cols, predicted_values)}
+    # CORRECTION: The variable name 'value' was incorrect. It should be 'target_value'.
+    predicted_dict = {target: target_value for target, target_value in zip(target_cols, predicted_values)}
 
     # NEW: Correct the predicted house type counts based on historical data
     historically_present_types = get_historically_present_house_types(df_original, grade)
@@ -458,13 +448,8 @@ if df is not None:
 
             with chart_col2:
                 st.write("#### จำนวนแปลงบ้าน")
-                house_data = [
-                    result_ml.get('จำนวนแปลง (ทาวโฮม)', 0),
-                    result_ml.get('จำนวนแปลง (บ้านแฝด)', 0),
-                    result_ml.get('จำนวนแปลง (บ้านเดี่ยว)', 0)
-                ]
-                house_labels = ['ทาวน์โฮม', 'บ้านแฝด', 'บ้านเดี่ยว']
-                plot_house_bar_chart(house_data, house_labels)
+                # UPDATED: Call the new, more dynamic bar chart function
+                plot_house_bar_chart(result_ml, house_types)
             
             st.subheader("📝 สร้าง Executive Summary อัตโนมัติ")
             if st.button("สร้างสรุปสำหรับผู้บริหารด้วย AI"):
