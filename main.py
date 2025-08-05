@@ -208,14 +208,19 @@ try:
     thai_font_path = None
     for font_name in thai_fonts:
         try:
-            thai_font_path = fm.findfont(fm.FontProperties(family=font_name))
-            if thai_font_path:
-                plt.rcParams['font.family'] = font_name
-                st.success(f"ใช้ฟอนต์ '{font_name}' สำหรับภาษาไทยในกราฟ")
+            font_path_candidate = fm.findfont(fm.FontProperties(family=font_name))
+            if font_path_candidate:
+                thai_font_path = font_path_candidate
                 break
         except Exception:
             continue
-    if not thai_font_path:
+    
+    if thai_font_path:
+        fm.fontManager.addfont(thai_font_path)
+        plt.rcParams['font.family'] = fm.FontProperties(fname=thai_font_path).get_name()
+        plt.rcParams['axes.unicode_minus'] = False # Fix for minus signs in Thai font
+        st.success(f"ใช้ฟอนต์ '{plt.rcParams['font.family']}' สำหรับภาษาไทยในกราฟ")
+    else:
         st.warning("ไม่พบฟอนต์ที่รองรับภาษาไทยในระบบ ใช้ฟอนต์เริ่มต้น")
 
 except Exception as e:
