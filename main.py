@@ -203,6 +203,7 @@ if uploaded_file:
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         elif uploaded_file.name.endswith('.xlsx'):
+            # This requires 'openpyxl' to be installed
             df = pd.read_excel(uploaded_file, sheet_name='Sheet1')
         df.columns = df.columns.str.strip()
         st.success("โหลดข้อมูลสำเร็จแล้ว!")
@@ -274,6 +275,7 @@ if df is not None:
     # --- 3. Model Training, Loading, and Tuning ---
     st.sidebar.subheader("ตัวเลือกโมเดล")
 
+    model = None
     if os.path.exists(MODEL_PATH):
         st.sidebar.success("โหลดโมเดลจากไฟล์สำเร็จแล้ว!")
         model = joblib.load(MODEL_PATH)
@@ -281,8 +283,8 @@ if df is not None:
     else:
         st.sidebar.info("ยังไม่มีไฟล์โมเดล โมเดลจะถูกฝึกและบันทึกในครั้งแรก.")
         run_tuning = st.sidebar.checkbox("ต้องการปรับจูนโมเดลใหม่หรือไม่?", value=True)
-
-    if st.sidebar.button("ฝึก/ปรับจูนโมเดล") or not os.path.exists(MODEL_PATH):
+    
+    if st.sidebar.button("ฝึก/ปรับจูนโมเดล") or not os.path.exists(MODEL_PATH) and model is None:
         if run_tuning:
             st.sidebar.subheader("กำลังปรับจูน Hyperparameter...")
             with st.spinner('กำลังค้นหา Hyperparameter ที่ดีที่สุด...'):
@@ -294,7 +296,6 @@ if df is not None:
                     'regressor__max_depth': [5, 10, None]
                 }
                 
-                # ใช้ a simplified version of GridSearchCV for faster runtimes
                 grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='r2', n_jobs=-1)
                 grid_search.fit(X_train, y_train)
                 model = grid_search.best_estimator_
@@ -317,7 +318,7 @@ if df is not None:
             st.sidebar.error(f"เกิดข้อผิดพลาดในการบันทึกโมเดล: {e}")
 
     # --- 4. Model Evaluation ---
-    if 'model' in locals():
+    if model is not None:
         st.sidebar.subheader("📊 ประสิทธิภาพโมเดล (บนข้อมูลทดสอบ)")
         try:
             y_pred_test = model.predict(X_test)
@@ -370,7 +371,7 @@ if df is not None:
 
     # Prediction button
     if st.button("ทำนายผังโครงการ"):
-        if 'model' in locals():
+        if model is not None:
             with st.spinner('กำลังทำนายผล...'):
                 result_ml = predict_and_analyze(
                     project_area_input, land_shape_input, grade_input, province_input,
@@ -439,7 +440,7 @@ if df is not None:
     analysis_project_area = st.number_input("พื้นที่โครงการ (ตร.วา)", min_value=1000.0, value=40000.0, step=500.0, key='analysis_project_area')
 
     if st.button("ค้นหาทางเลือกที่ดีที่สุด"):
-        if 'model' in locals():
+        if model is not None:
             with st.spinner('กำลังวิเคราะห์ทางเลือกทั้งหมด...'):
                 best_grade_results = []
                 available_grades_for_analysis = df['เกรดโครงการ'].dropna().unique().tolist()
