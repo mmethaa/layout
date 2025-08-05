@@ -21,8 +21,6 @@ GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini
 
 # --- Constants and File Paths ---
 MODEL_PATH = "random_forest_model.joblib"
-# คำเตือน: Streamlit Cloud ไม่สามารถใช้ไฟล์ที่เก็บในเครื่องได้ ถ้าใช้งานบนคลาวด์อาจต้องปรับวิธี
-# การเก็บไฟล์หรือใช้ Streamlit's caching mechanisms แทน.
 
 # --- Helper Functions ---
 def call_gemini_api(prompt):
@@ -44,11 +42,8 @@ def call_gemini_api(prompt):
         ]
     }
     
-    # Use the default API Key provided by the Canvas environment if not explicitly set.
     api_key_to_use = GEMINI_API_KEY
     if not api_key_to_use:
-        # This part assumes the environment provides the key automatically
-        # which is the case for the Canvas environment
         pass
     
     url = f"{GEMINI_API_URL}?key={api_key_to_use}"
@@ -79,7 +74,6 @@ def plot_area_pie_chart(data, labels):
     ax.axis('equal') # Equal aspect ratio ensures that pie is drawn as a circle.
     st.pyplot(fig)
 
-# UPDATED: This function now dynamically generates a bar chart for all house types with non-zero counts.
 def plot_house_bar_chart(result_ml, house_types_list):
     """
     Generates and displays a bar chart for house types with non-zero counts.
@@ -101,21 +95,18 @@ def plot_house_bar_chart(result_ml, house_types_list):
     else:
         st.warning("ไม่มีข้อมูลจำนวนแปลงบ้านที่ทำนายได้")
 
-# This function checks and corrects house type predictions based on historical data.
-def get_historically_present_house_types(df, grade_input):
+def get_historically_present_house_types(df, grade_input, house_types):
     """
     Checks the original dataframe to see which house types are actually present for a given grade.
     Returns a set of house types with non-zero counts.
     """
     grade_df = df[df['เกรดโครงการ'] == grade_input]
     present_house_types = set()
-    house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
     for h_type in house_types:
         if h_type in grade_df.columns and grade_df[h_type].sum() > 0:
             present_house_types.add(h_type)
     return present_house_types
 
-# Corrected predict_and_analyze function
 def predict_and_analyze(project_area, land_shape, grade, province, ml_model, house_types_list, target_cols,
                         sale_prices, construct_costs, land_cost_sqwah, other_dev_ratio,
                         unit_standard_area_sqwah_dict, df_original):
@@ -126,16 +117,12 @@ def predict_and_analyze(project_area, land_shape, grade, province, ml_model, hou
     input_data = pd.DataFrame([[project_area, land_shape, grade, province]],
                               columns=['พื้นที่โครงการ(ตรม)', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด'])
 
-    # Get the initial prediction from the ML model
     predicted_values = ml_model.predict(input_data)[0]
-    # CORRECTION: The variable name 'value' was incorrect. It should be 'target_value'.
     predicted_dict = {target: target_value for target, target_value in zip(target_cols, predicted_values)}
 
-    # NEW: Correct the predicted house type counts based on historical data
-    historically_present_types = get_historically_present_house_types(df_original, grade)
+    historically_present_types = get_historically_present_house_types(df_original, grade, house_types_list)
     for h_type in house_types_list:
         if h_type not in historically_present_types:
-            # If a house type is not historically present for this grade, force its prediction to 0
             if h_type in predicted_dict:
                 predicted_dict[h_type] = 0
 
@@ -147,7 +134,7 @@ def predict_and_analyze(project_area, land_shape, grade, province, ml_model, hou
         'จำนวนแปลงรวม': max(0, int(round(predicted_dict.get('จำนวนหลัง', 0)))),
         'จำนวนซอย': max(1, int(round(predicted_dict.get('จำนวนซอย', 0))))
     }
-
+    
     # Recalculate 'พื้นที่สวน' based on the predicted 'พื้นที่ขาย'
     avg_garden_ratio_of_dist = 0.05
     result['พื้นที่สวน (ตร.วา)'] = round(result['พื้นที่ขาย (ตร.วา)'] * avg_garden_ratio_of_dist, 2)
@@ -177,9 +164,7 @@ def predict_and_analyze(project_area, land_shape, grade, province, ml_model, hou
     result['ต้นทุนรวม (ทำนาย)'] = round(total_cost, 2)
     result['กำไร (ทำนาย)'] = round(profit, 2)
 
-    # Sanity check for predicted vs calculated areas
     result['พื้นที่รวมจากจำนวนแปลง (ตร.วา)'] = round(total_area_from_units, 2)
-    
     predicted_sale_area = result['พื้นที่ขาย (ตร.วา)']
     
     if predicted_sale_area > 0:
@@ -276,7 +261,6 @@ if df is not None:
     unit_standard_area_sqwah = {
         h_type: area_sqm * sqm_to_sqwah for h_type, area_sqm in unit_standard_area_sqm.items()
     }
-    # Adjusted house_types list to match the updated unit_standard_area_sqm dictionary
     house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
 
     features = ['พื้นที่โครงการ(ตรม)', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด']
@@ -295,15 +279,15 @@ if df is not None:
     X = df[features].copy()
     y = df[targets].copy()
 
+    # --- Robust Data Cleaning ---
     for col in ['รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด']:
         if col in X.columns and X[col].isnull().any():
             mode_val = X[col].mode()[0]
             X.loc[:, col] = X[col].fillna(mode_val)
     
-    for col in ['พื้นที่โครงการ(ตรม)']:
-        if col in X.columns and X[col].isnull().any():
-            mean_val = X[col].mean()
-            X.loc[:, col] = X[col].fillna(mean_val)
+    if 'พื้นที่โครงการ(ตรม)' in X.columns and X['พื้นที่โครงการ(ตรม)'].isnull().any():
+        mean_val = X['พื้นที่โครงการ(ตรม)'].mean()
+        X.loc[:, 'พื้นที่โครงการ(ตรม)'] = X['พื้นที่โครงการ(ตรม)'].fillna(mean_val)
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
@@ -330,7 +314,16 @@ if df is not None:
         st.sidebar.info("ยังไม่มีไฟล์โมเดล โมเดลจะถูกฝึกและบันทึกในครั้งแรก.")
         run_tuning = st.sidebar.checkbox("ต้องการปรับจูนโมเดลใหม่หรือไม่?", value=True)
     
-    if st.sidebar.button("ฝึก/ปรับจูนโมเดล") or not os.path.exists(MODEL_PATH) and model is None:
+    st.sidebar.markdown("""
+        ---
+        **คำแนะนำเพื่อเพิ่มความแม่นยำของโมเดล:**
+        1. **Hyperparameter Tuning:** กด 'ฝึก/ปรับจูนโมเดล' โดยเลือก 'ปรับจูนโมเดลใหม่' เพื่อค้นหาค่าที่ดีที่สุด.
+        2. **เพิ่มข้อมูล:** ยิ่งมีข้อมูลโครงการมากเท่าไหร่ โมเดลก็จะยิ่งเรียนรู้ได้ดีขึ้น.
+        3. **Feature Engineering:** ลองสร้างฟีเจอร์ใหม่ๆ จากข้อมูลที่มี เช่น สัดส่วนพื้นที่ขายต่อพื้นที่โครงการ.
+        4. **เปลี่ยนโมเดล:** ลองใช้โมเดลอื่นที่ไม่ใช่ Random Forest เช่น Gradient Boosting Machines (LightGBM, XGBoost).
+    """)
+
+    if st.sidebar.button("ฝึก/ปรับจูนโมเดล") or (not os.path.exists(MODEL_PATH) and model is None):
         if run_tuning:
             st.sidebar.subheader("กำลังปรับจูน Hyperparameter เพื่อเพิ่มประสิทธิภาพ R² ...")
             with st.spinner('กำลังค้นหา Hyperparameter ที่ดีที่สุด...'):
@@ -339,8 +332,9 @@ if df is not None:
                 
                 param_grid = {
                     'regressor__n_estimators': [100, 200, 300, 400],
-                    'regressor__max_depth': [5, 10, 15, None],
-                    'regressor__min_samples_split': [2, 5, 10]
+                    'regressor__max_depth': [5, 10, 15, 20, None],
+                    'regressor__min_samples_split': [2, 5, 10],
+                    'regressor__min_samples_leaf': [1, 2, 4]
                 }
                 
                 grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='r2', n_jobs=-1, verbose=1)
@@ -368,9 +362,14 @@ if df is not None:
         st.sidebar.subheader("📊 ประสิทธิภาพโมเดล (บนข้อมูลทดสอบ)")
         try:
             y_pred_test = model.predict(X_test)
+            r2_score_value = r2_score(y_test, y_pred_test)
             st.sidebar.write("**ประสิทธิภาพรวม**")
             st.sidebar.markdown(f"- **MAE เฉลี่ย:** {mean_absolute_error(y_test, y_pred_test):,.2f}")
-            st.sidebar.markdown(f"- **R² เฉลี่ย:** {r2_score(y_test, y_pred_test):.4f}")
+            st.sidebar.markdown(f"- **R² เฉลี่ย:** {r2_score_value:.4f}")
+            
+            if r2_score_value < 0.5:
+                st.sidebar.warning("ประสิทธิภาพของโมเดลยังต่ำ ควรพิจารณาปรับจูน Hyperparameter หรือเพิ่มข้อมูล")
+
         except Exception as e:
             st.sidebar.error(f"เกิดข้อผิดพลาดในการประเมินโมเดล: {e}")
 
@@ -384,7 +383,6 @@ if df is not None:
         sale_price_th = col1.number_input("ราคาขาย ทาวน์โฮม (บาท)", value=2_500_000, step=100_000, key='sale_th')
         sale_price_ba = col2.number_input("ราคาขาย บ้านแฝด (บาท)", value=4_000_000, step=100_000, key='sale_ba')
         sale_price_bd = col3.number_input("ราคาขาย บ้านเดี่ยว (บาท)", value=6_000_000, step=100_000, key='sale_bd')
-        # Additional house types for assumption
         sale_price_bd3 = st.number_input("ราคาขาย บ้านเดี่ยว3ชั้น (บาท)", value=9_000_000, step=100_000, key='sale_bd3')
         sale_price_comm = st.number_input("ราคาขาย อาคารพาณิชย์ (บาท)", value=5_000_000, step=100_000, key='sale_comm')
 
@@ -392,7 +390,6 @@ if df is not None:
         cost_th = col4.number_input("ต้นทุน ทาวน์โฮม (บาท)", value=1_500_000, step=50_000, key='cost_th')
         cost_ba = col5.number_input("ต้นทุน บ้านแฝด (บาท)", value=2_500_000, step=50_000, key='cost_ba')
         cost_bd = col6.number_input("ต้นทุน บ้านเดี่ยว (บาท)", value=3_500_000, step=50_000, key='cost_bd')
-        # Additional house types for assumption
         cost_bd3 = st.number_input("ต้นทุน บ้านเดี่ยว3ชั้น (บาท)", value=5_500_000, step=50_000, key='cost_bd3')
         cost_comm = st.number_input("ต้นทุน อาคารพาณิชย์ (บาท)", value=3_000_000, step=50_000, key='cost_comm')
 
@@ -403,7 +400,6 @@ if df is not None:
     sale_price_per_unit = {'ทาวโฮม': sale_price_th, 'บ้านแฝด': sale_price_ba, 'บ้านเดี่ยว': sale_price_bd, 'บ้านเดี่ยว3ชั้น': sale_price_bd3, 'อาคารพาณิชย์': sale_price_comm}
     construction_cost_per_unit = {'ทาวโฮม': cost_th, 'บ้านแฝด': cost_ba, 'บ้านเดี่ยว': cost_bd, 'บ้านเดี่ยว3ชั้น': cost_bd3, 'อาคารพาณิชย์': cost_comm}
 
-    # Input form for new project prediction
     input_col1, input_col2 = st.columns(2)
     project_area_input = input_col1.number_input("พื้นที่โครงการ (ตร.วา)",
                                                  min_value=float(X['พื้นที่โครงการ(ตรม)'].min()),
@@ -448,7 +444,6 @@ if df is not None:
 
             with chart_col2:
                 st.write("#### จำนวนแปลงบ้าน")
-                # UPDATED: Call the new, more dynamic bar chart function
                 plot_house_bar_chart(result_ml, house_types)
             
             st.subheader("📝 สร้าง Executive Summary อัตโนมัติ")
