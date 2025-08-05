@@ -1,148 +1,262 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, r2_score
-# import xgboost as xgb # เพิ่ม import xgboost เข้ามา - Removed as per user's error
+import matplotlib.pyplot as plt
+import joblib
+import os
+import requests
+import json
+import base64
 
-# --- Streamlit UI: File Uploader ---
+# --- API Configuration ---
+# ใส่ API key ของคุณที่นี่ หากคุณต้องการใช้ Gemini API. หากปล่อยว่างไว้ ระบบจะใช้ API Key อัตโนมัติ.
+GEMINI_API_KEY = ""
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
+
+# --- Constants and File Paths ---
+MODEL_PATH = "random_forest_model.joblib"
+# คำเตือน: Streamlit Cloud ไม่สามารถใช้ไฟล์ที่เก็บในเครื่องได้ ถ้าใช้งานบนคลาวด์อาจต้องปรับวิธี
+# การเก็บไฟล์หรือใช้ Streamlit's caching mechanisms แทน.
+
+# --- Helper Functions ---
+def call_gemini_api(prompt):
+    """
+    Calls the Gemini API to generate a response.
+    """
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": prompt}
+                ]
+            }
+        ]
+    }
+    
+    # Use the default API Key provided by the Canvas environment if not explicitly set.
+    api_key_to_use = GEMINI_API_KEY
+    if not api_key_to_use:
+        # Assuming the environment provides the key automatically
+        # This part might need to be adjusted based on the execution environment
+        pass
+    
+    url = f"{GEMINI_API_URL}?key={api_key_to_use}"
+    
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+        response_json = response.json()
+        
+        if 'candidates' in response_json and response_json['candidates']:
+            return response_json['candidates'][0]['content']['parts'][0]['text']
+        else:
+            return "ไม่สามารถสร้างสรุปได้ โปรดลองอีกครั้ง"
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"เกิดข้อผิดพลาดในการเรียกใช้ Gemini API: {e}")
+        return "ไม่สามารถสร้างสรุปได้ เนื่องจากเกิดข้อผิดพลาดในการเชื่อมต่อ"
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดที่ไม่คาดคิด: {e}")
+        return "ไม่สามารถสร้างสรุปได้ เนื่องจากเกิดข้อผิดพลาดที่ไม่คาดคิด"
+
+def pcm_to_wav(pcm_data, sample_rate=16000):
+    """
+    Converts raw PCM audio data (bytes) into a WAV format blob.
+    
+    Args:
+        pcm_data (bytes): The raw PCM audio data.
+        sample_rate (int): The sample rate of the audio.
+    
+    Returns:
+        bytes: A bytes object containing the WAV file data.
+    """
+    with io.BytesIO() as wav_file:
+        wav_writer = wave.open(wav_file, 'wb')
+        wav_writer.setnchannels(1)  # Mono
+        wav_writer.setsampwidth(2)   # 16-bit
+        wav_writer.setframerate(sample_rate)
+        wav_writer.writeframes(pcm_data)
+        wav_writer.close()
+        return wav_file.getvalue()
+
+def plot_area_pie_chart(data, labels):
+    """
+    Generates and displays a pie chart for area breakdown.
+    """
+    fig, ax = plt.subplots()
+    ax.pie(data, labels=labels, autopct='%1.1f%%', startangle=90, colors=['#1d4ed8', '#60a5fa', '#34d399', '#fbbf24'])
+    ax.axis('equal') # Equal aspect ratio ensures that pie is drawn as a circle.
+    st.pyplot(fig)
+
+def plot_house_bar_chart(data, labels):
+    """
+    Generates and displays a bar chart for house types.
+    """
+    fig, ax = plt.subplots()
+    ax.bar(labels, data, color=['#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd'])
+    ax.set_ylabel('จำนวนแปลง')
+    ax.set_title('จำนวนแปลงบ้านแต่ละประเภท')
+    st.pyplot(fig)
+
+def predict_and_analyze(project_area, land_shape, grade, province, ml_model, house_types_list, target_cols,
+                        sale_prices, construct_costs, land_cost_sqwah, other_dev_ratio,
+                        unit_standard_area_sqwah_dict):
+    """
+    Performs a prediction using the trained ML model and calculates financial metrics.
+    """
+    input_data = pd.DataFrame([[project_area, land_shape, grade, province]],
+                              columns=['พื้นที่โครงการ(ตรม)', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด'])
+
+    predicted_values = ml_model.predict(input_data)[0]
+    predicted_dict = {target: value for target, value in zip(target_cols, predicted_values)}
+
+    result = {
+        'พื้นที่โครงการ (ตร.วา)': round(project_area, 2),
+        'พื้นที่ขาย (ตร.วา)': round(predicted_dict.get('พื้นที่จัดจำหน่าย(ตรม)', 0), 2),
+        'พื้นที่ถนน (ตร.วา)': round(predicted_dict.get('พื้นที่ถนนรวม', 0), 2),
+        'พื้นที่สาธารณะ (ตร.วา)': round(predicted_dict.get('พื้นที่สาธา(ตรม)', 0), 2),
+        'จำนวนแปลงรวม': max(0, int(round(predicted_dict.get('จำนวนหลัง', 0)))),
+        'จำนวนซอย': max(1, int(round(predicted_dict.get('จำนวนซอย', 0))))
+    }
+
+    # Recalculate 'พื้นที่สวน' based on the predicted 'พื้นที่ขาย'
+    avg_garden_ratio_of_dist = 0.05
+    result['พื้นที่สวน (ตร.วา)'] = round(result['พื้นที่ขาย (ตร.วา)'] * avg_garden_ratio_of_dist, 2)
+
+    total_gross_revenue = 0
+    total_construction_cost = 0
+    total_area_from_units = 0
+
+    for h_type in house_types_list:
+        col_name = h_type
+        num_units = max(0, int(round(predicted_dict.get(col_name, 0))))
+        result[f'จำนวนแปลง ({h_type})'] = num_units
+
+        total_gross_revenue += num_units * sale_prices.get(h_type, 0)
+        total_construction_cost += num_units * construct_costs.get(h_type, 0)
+        
+        if h_type in unit_standard_area_sqwah_dict:
+            total_area_from_units += num_units * unit_standard_area_sqwah_dict[h_type]
+
+    calculated_land_cost = project_area * land_cost_sqwah
+    calculated_other_dev_cost = total_gross_revenue * other_dev_ratio
+
+    total_cost = total_construction_cost + calculated_land_cost + calculated_other_dev_cost
+    profit = total_gross_revenue - total_cost
+
+    result['รายได้รวม (ทำนาย)'] = round(total_gross_revenue, 2)
+    result['ต้นทุนรวม (ทำนาย)'] = round(total_cost, 2)
+    result['กำไร (ทำนาย)'] = round(profit, 2)
+
+    # Sanity check for predicted vs calculated areas
+    result['พื้นที่รวมจากจำนวนแปลง (ตร.วา)'] = round(total_area_from_units, 2)
+    
+    predicted_sale_area = result['พื้นที่ขาย (ตร.วา)']
+    
+    if predicted_sale_area > 0:
+        area_diff = predicted_sale_area - total_area_from_units
+        result['ส่วนต่าง (พื้นที่ขาย - พื้นที่รวมแปลง)'] = round(area_diff, 2)
+        
+        utilization_ratio = total_area_from_units / predicted_sale_area
+        result['สัดส่วนพื้นที่แปลงที่ใช้จากพื้นที่ขาย (%)'] = round(utilization_ratio * 100, 2)
+
+        if utilization_ratio > 1.05:
+            st.warning(f"💡 คำเตือน: พื้นที่รวมจากจำนวนแปลงที่ทำนาย ({total_area_from_units:,.2f} ตร.วา) "
+                        f"สูงกว่าพื้นที่ขายที่โมเดลทำนายไว้ ({predicted_sale_area:,.2f} ตร.วา) "
+                        f"อย่างมีนัยสำคัญ ({utilization_ratio*100:,.1f}%). "
+                        f"อาจบ่งชี้ว่าผังนี้ไม่เหมาะสมกับขนาดบ้านที่กำหนด หรือจำเป็นต้องปรับขนาดบ้าน/จำนวนแปลง")
+        elif utilization_ratio < 0.8:
+            st.info(f"💡 ข้อแนะนำ: พื้นที่รวมจากจำนวนแปลงที่ทำนาย ({total_area_from_units:,.2f} ตร.วา) "
+                    f"ต่ำกว่าพื้นที่ขายที่โมเดลทำนายไว้ ({predicted_sale_area:,.2f} ตร.วา) "
+                    f"ทำให้มีพื้นที่เหลือค่อนข้างมาก ({((1-utilization_ratio)*100):,.1f}%). "
+                    f"อาจสามารถเพิ่มจำนวนแปลงหรือปรับขนาดบ้านให้เหมาะสมยิ่งขึ้นได้")
+    else:
+        result['ส่วนต่าง (พื้นที่ขาย - พื้นที่รวมแปลง)'] = 0
+        result['สัดส่วนพื้นที่แปลงที่ใช้จากพื้นที่ขาย (%)'] = 0
+        st.warning("พื้นที่ขายที่ทำนายเป็นศูนย์ ตรวจสอบให้แน่ใจว่าผลการทำนายถูกต้อง")
+
+    return result
+
+# --- Streamlit UI: Main App ---
 st.title("📐 Smart Layout Predictor (ML Powered)")
-st.write("โปรดอัปโหลดไฟล์ข้อมูลโครงการของคุณ (layoutdata.xlsx - Sheet1.csv) เพื่อเริ่มต้นการทำนายและวิเคราะห์")
+st.markdown("โปรดอัปโหลดไฟล์ข้อมูลโครงการของคุณ (layoutdata.xlsx - Sheet1.csv) เพื่อเริ่มต้นการทำนายและวิเคราะห์")
 
+# --- 1. File Uploader and Data Loading ---
 uploaded_file = st.file_uploader("เลือกไฟล์ CSV หรือ Excel (Sheet1.csv)", type=["csv", "xlsx"])
 
-df = None # Initialize df to None
-
-if uploaded_file is not None:
+df = None
+if uploaded_file:
     try:
-        # Check file type to read correctly
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         elif uploaded_file.name.endswith('.xlsx'):
-            # If it's an Excel file, ensure it reads Sheet1
             df = pd.read_excel(uploaded_file, sheet_name='Sheet1')
-        else:
-            st.error("นามสกุลไฟล์ไม่ถูกต้อง โปรดอัปโหลดไฟล์ .csv หรือ .xlsx")
-            st.stop()
-
-        df.columns = df.columns.str.strip() # Remove leading/trailing whitespaces from column names
+        df.columns = df.columns.str.strip()
         st.success("โหลดข้อมูลสำเร็จแล้ว!")
-
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการโหลดไฟล์: {e}")
         st.stop()
 else:
     st.info("กรุณาอัปโหลดไฟล์ข้อมูลก่อนดำเนินการต่อ")
-    st.stop() # Stop execution if no file is uploaded yet
+    st.stop()
 
 # --- Continue only if df is loaded ---
 if df is not None:
-    # --- 2. Unit Conversion (sqm ➝ sq. wah) ---
-    sqm_to_sqwah = 0.25 # 1 ตร.ม. = 0.25 ตร.วา
+    # --- 2. Data Preprocessing & Model Setup ---
+    sqm_to_sqwah = 0.25
     columns_to_convert = ['พื้นที่โครงการ(ตรม)', 'พื้นที่จัดจำหน่าย(ตรม)', 'พื้นที่สาธา(ตรม)', 'พื้นที่ถนนรวม', 'พื้นที่สวน(5%ของพื้นที่จัดจำหน่าย)']
     for col in columns_to_convert:
         if col in df.columns:
             df[col] *= sqm_to_sqwah
-        else:
-            # ใช้ st.sidebar.warning เพื่อไม่ให้ข้อความไปรบกวนหน้าหลักมากเกินไป
-            st.sidebar.warning(f"Column '{col}' not found for unit conversion. Skipping.")
 
-    # --- 3. Setup House Area (Standard dimensions for calculation) ---
-    # Fixed standard areas for calculation (in square meters as per user request)
     unit_standard_area_sqm = {
-        'ทาวโฮม': 5 * 16,  # 80 sqm
-        'บ้านแฝด': 10 * 16, # 160 sqm
-        'บ้านเดี่ยว': 15 * 18 # 270 sqm
+        'ทาวโฮม': 5 * 16,
+        'บ้านแฝด': 10 * 16,
+        'บ้านเดี่ยว': 15 * 18
     }
-
-    # Convert standard areas to square wah for consistency with other area calculations
     unit_standard_area_sqwah = {
-        h_type: area_sqm * sqm_to_sqwah
-        for h_type, area_sqm in unit_standard_area_sqm.items()
+        h_type: area_sqm * sqm_to_sqwah for h_type, area_sqm in unit_standard_area_sqm.items()
     }
-
-    # อัปเดต: ลบประเภทบ้านที่ข้อมูลน้อยเกินไปออก
     house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว']
 
-    # --- NEW: สมมติฐานราคาขายและต้นทุนต่อหน่วย (สามารถปรับเปลี่ยนได้ตามข้อมูลจริง) ---
-    st.sidebar.subheader("สมมติฐานราคาและต้นทุน")
-    st.sidebar.write("ใช้สำหรับการคำนวณรายได้และกำไร")
-
-    # ราคาขายต่อหลัง (เฉลี่ย)
-    st.sidebar.markdown("**ราคาขายต่อหลัง (บาท)**")
-    sale_price_th = st.sidebar.number_input("ทาวโฮม", value=2_500_000, step=100_000, key='sale_th')
-    sale_price_ba = st.sidebar.number_input("บ้านแฝด", value=4_000_000, step=100_000, key='sale_ba')
-    sale_price_bd = st.sidebar.number_input("บ้านเดี่ยว", value=6_000_000, step=100_000, key='sale_bd')
-
-    sale_price_per_unit = {
-        'ทาวโฮม': sale_price_th,
-        'บ้านแฝด': sale_price_ba,
-        'บ้านเดี่ยว': sale_price_bd,
-    }
-
-    # ต้นทุนก่อสร้างต่อหลัง (เฉลี่ย)
-    st.sidebar.markdown("**ต้นทุนก่อสร้างต่อหลัง (บาท)**")
-    cost_th = st.sidebar.number_input("ทาวโฮม_Cost", value=1_500_000, step=50_000, key='cost_th')
-    cost_ba = st.sidebar.number_input("บ้านแฝด_Cost", value=2_500_000, step=50_000, key='cost_ba')
-    cost_bd = st.sidebar.number_input("บ้านเดี่ยว_Cost", value=3_500_000, step=50_000, key='cost_bd')
-
-    construction_cost_per_unit = {
-        'ทาวโฮม': cost_th,
-        'บ้านแฝด': cost_ba,
-        'บ้านเดี่ยว': cost_bd,
-    }
-
-    # ต้นทุนที่ดินและพัฒนาอื่นๆ (ค่าต่อ ตร.วา และ % ของรายได้รวม)
-    land_cost_per_sqwah = st.sidebar.number_input("ต้นทุนที่ดิน (บาท/ตร.วา)", value=50000, step=1000, key='land_cost')
-    other_development_cost_ratio = st.sidebar.slider("ต้นทุนพัฒนาอื่นๆ (% ของรายได้รวม)", min_value=0.0, max_value=0.3, value=0.20, step=0.01, key='other_cost_ratio')
-
-    # --- 4. Data Preprocessing for Machine Learning ---
-
-    # กำหนด Features (ตัวแปรต้น)
     features = ['พื้นที่โครงการ(ตรม)', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด']
-
-    # กำหนด Targets (ตัวแปรตาม)
-    # เพิ่ม 'พื้นที่สาธา(ตรม)' เข้าไปใน targets เพื่อให้โมเดลทำนายโดยตรง
     targets = ['พื้นที่จัดจำหน่าย(ตรม)', 'จำนวนหลัง', 'จำนวนซอย', 'พื้นที่ถนนรวม', 'พื้นที่สาธา(ตรม)']
-    for h_type in house_types: # จะวนแค่ ทาวโฮม, บ้านแฝด, บ้านเดี่ยว
+    for h_type in house_types:
         if h_type in df.columns:
             targets.append(h_type)
-        else:
-            st.sidebar.warning(f"Target column '{h_type}' not found in data. Skipping this target.")
 
-    # Filter out features/targets that are not in the dataframe after loading
     features = [f for f in features if f in df.columns]
     targets = [t for t in targets if t in df.columns]
 
-    if not features:
-        st.error("ไม่พบ Features ที่ใช้ในการเทรนโมเดล โปรดตรวจสอบชื่อคอลัมน์ในไฟล์ข้อมูลที่อัปโหลด")
-        st.stop()
-    if not targets:
-        st.error("ไม่พบ Targets ที่ใช้ในการเทรนโมเดล โปรดตรวจสอบชื่อคอลัมน์ในไฟล์ข้อมูลที่อัปโหลด")
+    if not features or not targets:
+        st.error("ไม่พบ Features หรือ Targets ที่ใช้ในการเทรนโมเดล")
         st.stop()
 
-    X = df[features].copy() # Use .copy() to avoid SettingWithCopyWarning
-    y = df[targets].copy() # Use .copy() to avoid SettingWithCopyWarning
+    X = df[features].copy()
+    y = df[targets].copy()
 
-    # Handle potential missing categorical values in input data (fill with mode for training)
     for col in ['รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด']:
-        if col in X.columns:
-            if X[col].isnull().any():
-                mode_val = X[col].mode()[0]
-                X.loc[:, col] = X[col].fillna(mode_val) # Use .loc for assignment
-                st.sidebar.info(f"Filled missing values in '{col}' with mode: {mode_val}")
+        if col in X.columns and X[col].isnull().any():
+            mode_val = X[col].mode()[0]
+            X.loc[:, col] = X[col].fillna(mode_val)
     
-    # Handle potential missing numerical values (e.g., in พื้นที่โครงการ(ตรม) if any)
     for col in ['พื้นที่โครงการ(ตรม)']:
-        if col in X.columns:
-            if X[col].isnull().any():
-                mean_val = X[col].mean()
-                X.loc[:, col] = X[col].fillna(mean_val) # Use .loc for assignment
-                st.sidebar.info(f"Filled missing values in '{col}' with mean: {mean_val:.2f}")
+        if col in X.columns and X[col].isnull().any():
+            mean_val = X[col].mean()
+            X.loc[:, col] = X[col].fillna(mean_val)
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     categorical_features = [col for col in ['รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด'] if col in X.columns]
     numerical_features = [col for col in ['พื้นที่โครงการ(ตรม)'] if col in X.columns]
@@ -155,182 +269,189 @@ if df is not None:
         remainder='passthrough'
     )
 
-    # --- 5. Model Training ---
+    # --- 3. Model Training, Loading, and Tuning ---
     st.sidebar.subheader("ตัวเลือกโมเดล")
-    model_type = st.sidebar.selectbox("เลือกประเภทโมเดล", ["RandomForestRegressor"]) # Only RandomForestRegressor available
 
-    if model_type == "RandomForestRegressor":
-        regressor = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)
-
-    model = Pipeline(steps=[('preprocessor', preprocessor),
-                            ('regressor', regressor)
-                           ])
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    st.sidebar.subheader("สถานะโมเดล")
-    with st.spinner(f'กำลังฝึกโมเดล {model_type}...'):
-        try:
-            model.fit(X_train, y_train)
-            st.sidebar.success(f"ฝึกโมเดล {model_type} เสร็จสิ้น!")
-        except Exception as e:
-            st.sidebar.error(f"เกิดข้อผิดพลาดในการฝึกโมเดล: {e}")
-            st.stop()
-
-    # --- 6. Model Evaluation ---
-    st.sidebar.subheader("📊 ประสิทธิภาพโมเดล (บนข้อมูลทดสอบ)")
-    try:
-        y_pred_test = model.predict(X_test)
-        y_pred_test_df = pd.DataFrame(y_pred_test, columns=targets, index=y_test.index)
-
-        for i, target_col in enumerate(targets):
-            actual_test_target = y_test[target_col].values
-            predicted_test_target = y_pred_test_df[target_col].values
-
-            mae_val = mean_absolute_error(actual_test_target, predicted_test_target)
-            r2_val = r2_score(actual_test_target, predicted_test_target)
-
-            st.sidebar.write(f"**Target: {target_col}**")
-            st.sidebar.markdown(f"- **MAE:** {mae_val:,.2f}")
-            st.sidebar.markdown(f"- **R²:** {r2_val:.4f}")
-    except Exception as e:
-        st.sidebar.error(f"เกิดข้อผิดพลาดในการประเมินโมเดล: {e}")
-
-
-    # --- 7. Prediction Function (ใช้โมเดล ML และคำนวณรายได้/กำไร) ---
-    def predict_with_ml(project_area, land_shape, grade, province, ml_model, house_types_list, target_cols,
-                        sale_prices, construct_costs, land_cost_sqwah, other_dev_ratio,
-                        unit_standard_area_sqwah_dict): # เพิ่ม dict ขนาดมาตรฐาน
-        input_data = pd.DataFrame([[project_area, land_shape, grade, province]],
-                                  columns=['พื้นที่โครงการ(ตรม)', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด'])
-
-        predicted_values = ml_model.predict(input_data)[0]
-
-        predicted_dict = {target: value for target, value in zip(target_cols, predicted_values)}
-
-        result = {
-            'พื้นที่โครงการ (ตร.วา)': round(project_area, 2),
-            'พื้นที่ขาย (ตร.วา)': round(predicted_dict.get('พื้นที่จัดจำหน่าย(ตรม)', 0), 2),
-            'พื้นที่ถนน (ตร.วา)': round(predicted_dict.get('พื้นที่ถนนรวม', 0), 2),
-            'พื้นที่สาธารณะ (ตร.วา)': round(predicted_dict.get('พื้นที่สาธา(ตรม)', 0), 2), # ใช้ค่าที่โมเดลทำนาย
-            'จำนวนแปลงรวม': max(0, int(round(predicted_dict.get('จำนวนหลัง', 0)))),
-            'จำนวนซอย': max(1, int(round(predicted_dict.get('จำนวนซอย', 0))))
-        }
-
-        total_gross_revenue = 0
-        total_construction_cost = 0
-        total_area_from_units = 0 # เพิ่มตัวแปรสำหรับเก็บพื้นที่รวมจากจำนวนแปลง
-
-        for h_type in house_types_list:
-            col_name = h_type
-            num_units = max(0, int(round(predicted_dict.get(col_name, 0))))
-            result[f'จำนวนแปลง ({h_type})'] = num_units
-
-            # คำนวณรายได้และต้นทุนก่อสร้างจากจำนวนแปลงที่ทำนายได้
-            total_gross_revenue += num_units * sale_prices.get(h_type, 0)
-            total_construction_cost += num_units * construct_costs.get(h_type, 0)
-            
-            # คำนวณพื้นที่รวมจากจำนวนแปลงที่ทำนายได้ โดยใช้ขนาดมาตรฐานที่กำหนด
-            if h_type in unit_standard_area_sqwah_dict:
-                total_area_from_units += num_units * unit_standard_area_sqwah_dict[h_type]
-        
-        # คำนวณต้นทุนที่ดิน
-        calculated_land_cost = project_area * land_cost_sqwah # project_area คือ ตร.วา แล้ว
-
-        # คำนวณต้นทุนพัฒนาอื่นๆ (คิดเป็น % ของรายได้รวม)
-        calculated_other_dev_cost = total_gross_revenue * other_dev_ratio
-
-        total_cost = total_construction_cost + calculated_land_cost + calculated_other_dev_cost
-        profit = total_gross_revenue - total_cost
-
-        result['รายได้รวม (ทำนาย)'] = round(total_gross_revenue, 2)
-        result['ต้นทุนรวม (ทำนาย)'] = round(total_cost, 2)
-        result['กำไร (ทำนาย)'] = round(profit, 2)
-
-        avg_garden_ratio_of_dist = 0.05
-        result['พื้นที่สวน (ตร.วา)'] = round(result['พื้นที่ขาย (ตร.วา)'] * avg_garden_ratio_of_dist, 2)
-
-        # --- NEW: การตรวจสอบความสอดคล้องกับขนาดพื้นที่มาตรฐาน ---
-        result['พื้นที่รวมจากจำนวนแปลง (ตร.วา)'] = round(total_area_from_units, 2)
-        
-        predicted_sale_area = result['พื้นที่ขาย (ตร.วา)']
-        
-        if predicted_sale_area > 0:
-            area_diff = predicted_sale_area - total_area_from_units
-            result['ส่วนต่าง (พื้นที่ขาย - พื้นที่รวมแปลง)'] = round(area_diff, 2)
-            
-            # ป้องกันหารด้วยศูนย์ ถ้า total_area_from_units เป็น 0
-            utilization_ratio = total_area_from_units / predicted_sale_area if predicted_sale_area > 0 else 0
-            result['สัดส่วนพื้นที่แปลงที่ใช้จากพื้นที่ขาย (%)'] = round(utilization_ratio * 100, 2)
-
-            if utilization_ratio > 1.05: # พื้นที่รวมแปลงสูงกว่าพื้นที่ขายที่ทำนายเกิน 5%
-                st.warning(f"💡 คำเตือน: พื้นที่รวมจากจำนวนแปลงที่ทำนาย ({total_area_from_units:,.2f} ตร.วา) "
-                           f"สูงกว่าพื้นที่ขายที่โมเดลทำนายไว้ ({predicted_sale_area:,.2f} ตร.วา) "
-                           f"อย่างมีนัยสำคัญ ({utilization_ratio*100:,.1f}%). "
-                           f"อาจบ่งชี้ว่าผังนี้ไม่เหมาะสมกับขนาดบ้านที่กำหนด หรือจำเป็นต้องปรับขนาดบ้าน/จำนวนแปลง")
-            elif utilization_ratio < 0.8: # พื้นที่รวมแปลงต่ำกว่าพื้นที่ขายที่ทำนายมากเกินไป (เหลือพื้นที่เยอะ)
-                st.info(f"💡 ข้อแนะนำ: พื้นที่รวมจากจำนวนแปลงที่ทำนาย ({total_area_from_units:,.2f} ตร.วา) "
-                        f"ต่ำกว่าพื้นที่ขายที่โมเดลทำนายไว้ ({predicted_sale_area:,.2f} ตร.วา) "
-                        f"ทำให้มีพื้นที่เหลือค่อนข้างมาก ({((1-utilization_ratio)*100):,.1f}%). "
-                        f"อาจสามารถเพิ่มจำนวนแปลงหรือปรับขนาดบ้านให้เหมาะสมยิ่งขึ้นได้")
-        else:
-            result['ส่วนต่าง (พื้นที่ขาย - พื้นที่รวมแปลง)'] = 0
-            result['สัดส่วนพื้นที่แปลงที่ใช้จากพื้นที่ขาย (%)'] = 0
-            st.warning("พื้นที่ขายที่ทำนายเป็นศูนย์ ตรวจสอบให้แน่ใจว่าผลการทำนายถูกต้อง")
-
-
-        return result
-
-    # --- 8. Best Option Analysis ---
-    st.subheader("💡 วิเคราะห์ทางเลือกที่ดีที่สุด (อิงจากข้อมูลในอดีตและสมมติฐานกำไร)")
-    st.write("วิเคราะห์เกรดโครงการที่ให้ 'กำไร (ทำนาย)' สูงสุด เมื่อพิจารณาจากรูปร่างที่ดินและจังหวัด")
-
-    available_grades_for_analysis = df['เกรดโครงการ'].dropna().unique().tolist()
-    if not available_grades_for_analysis:
-        st.warning("ไม่พบข้อมูล 'เกรดโครงการ' ในไฟล์ที่อัปโหลด ไม่สามารถวิเคราะห์ได้")
+    if os.path.exists(MODEL_PATH):
+        st.sidebar.success("โหลดโมเดลจากไฟล์สำเร็จแล้ว!")
+        model = joblib.load(MODEL_PATH)
+        run_tuning = st.sidebar.checkbox("ต้องการปรับจูนโมเดล (Hyperparameter Tuning) ใหม่?")
     else:
-        # ใช้ key ที่ไม่ซ้ำกันสำหรับ selectbox ในส่วนนี้
-        analysis_land_shape = st.selectbox("รูปร่างที่ดินสำหรับวิเคราะห์", df['รูปร่างที่ดิน'].dropna().unique().tolist(), key='analysis_land_shape')
-        analysis_province = st.selectbox("จังหวัดสำหรับวิเคราะห์", df['จังหวัด'].dropna().unique().tolist(), key='analysis_province')
-        analysis_project_area = st.number_input("พื้นที่โครงการ (ตร.วา) สำหรับวิเคราะห์", min_value=1000.0, max_value=100000.0, value=40000.0, step=500.0, key='analysis_project_area')
+        st.sidebar.info("ยังไม่มีไฟล์โมเดล โมเดลจะถูกฝึกและบันทึกในครั้งแรก.")
+        run_tuning = st.sidebar.checkbox("ต้องการปรับจูนโมเดลใหม่หรือไม่?", value=True)
 
-        if st.button("ค้นหาทางเลือกที่ดีที่สุด (กำไรสูงสุด)"):
-            best_grade_results = []
-            for grade_option in available_grades_for_analysis:
-                predicted_output = predict_with_ml(
-                    analysis_project_area,
-                    analysis_land_shape,
-                    grade_option,
-                    analysis_province,
-                    model,
-                    house_types,
-                    targets,
-                    sale_price_per_unit,       # Pass assumptions
-                    construction_cost_per_unit,# Pass assumptions
-                    land_cost_per_sqwah,       # Pass assumptions
-                    other_development_cost_ratio, # Pass assumptions
-                    unit_standard_area_sqwah # Pass standard unit areas
+    if st.sidebar.button("ฝึก/ปรับจูนโมเดล") or not os.path.exists(MODEL_PATH):
+        if run_tuning:
+            st.sidebar.subheader("กำลังปรับจูน Hyperparameter...")
+            with st.spinner('กำลังค้นหา Hyperparameter ที่ดีที่สุด...'):
+                pipeline = Pipeline(steps=[('preprocessor', preprocessor),
+                                           ('regressor', RandomForestRegressor(random_state=42, n_jobs=-1))])
+                
+                param_grid = {
+                    'regressor__n_estimators': [100, 200, 300],
+                    'regressor__max_depth': [5, 10, None]
+                }
+                
+                # ใช้ a simplified version of GridSearchCV for faster runtimes
+                grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='r2', n_jobs=-1)
+                grid_search.fit(X_train, y_train)
+                model = grid_search.best_estimator_
+                
+            st.sidebar.success(f"ปรับจูนโมเดลสำเร็จ! Best Parameters: {grid_search.best_params_}")
+        else:
+            st.sidebar.subheader("กำลังฝึกโมเดล...")
+            with st.spinner('กำลังฝึกโมเดล RandomForestRegressor...'):
+                regressor = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+                model = Pipeline(steps=[('preprocessor', preprocessor),
+                                       ('regressor', regressor)])
+                model.fit(X_train, y_train)
+            st.sidebar.success("ฝึกโมเดลสำเร็จ!")
+        
+        # Save the trained model
+        try:
+            joblib.dump(model, MODEL_PATH)
+            st.sidebar.info("บันทึกโมเดลแล้ว!")
+        except Exception as e:
+            st.sidebar.error(f"เกิดข้อผิดพลาดในการบันทึกโมเดล: {e}")
+
+    # --- 4. Model Evaluation ---
+    if 'model' in locals():
+        st.sidebar.subheader("📊 ประสิทธิภาพโมเดล (บนข้อมูลทดสอบ)")
+        try:
+            y_pred_test = model.predict(X_test)
+            st.sidebar.write("**ประสิทธิภาพรวม**")
+            st.sidebar.markdown(f"- **MAE เฉลี่ย:** {mean_absolute_error(y_test, y_pred_test):,.2f}")
+            st.sidebar.markdown(f"- **R² เฉลี่ย:** {r2_score(y_test, y_pred_test):.4f}")
+        except Exception as e:
+            st.sidebar.error(f"เกิดข้อผิดพลาดในการประเมินโมเดล: {e}")
+
+    # --- 5. User Inputs and Prediction ---
+    st.subheader("📈 ทำนายผังโครงการสำหรับโครงการใหม่")
+    st.markdown("ป้อนข้อมูลโครงการเพื่อทำนายผัง, จำนวนแปลง, รายได้, และกำไร")
+
+    # Use st.expander for a cleaner UI
+    with st.expander("สมมติฐานราคาและต้นทุน", expanded=False):
+        st.markdown("ค่าเหล่านี้จะใช้สำหรับคำนวณรายได้และกำไร")
+        col1, col2, col3 = st.columns(3)
+        sale_price_th = col1.number_input("ราคาขาย ทาวน์โฮม (บาท)", value=2_500_000, step=100_000, key='sale_th')
+        sale_price_ba = col2.number_input("ราคาขาย บ้านแฝด (บาท)", value=4_000_000, step=100_000, key='sale_ba')
+        sale_price_bd = col3.number_input("ราคาขาย บ้านเดี่ยว (บาท)", value=6_000_000, step=100_000, key='sale_bd')
+
+        col4, col5, col6 = st.columns(3)
+        cost_th = col4.number_input("ต้นทุน ทาวน์โฮม (บาท)", value=1_500_000, step=50_000, key='cost_th')
+        cost_ba = col5.number_input("ต้นทุน บ้านแฝด (บาท)", value=2_500_000, step=50_000, key='cost_ba')
+        cost_bd = col6.number_input("ต้นทุน บ้านเดี่ยว (บาท)", value=3_500_000, step=50_000, key='cost_bd')
+
+        col7, col8 = st.columns(2)
+        land_cost_per_sqwah = col7.number_input("ต้นทุนที่ดิน (บาท/ตร.วา)", value=50000, step=1000, key='land_cost')
+        other_development_cost_ratio = col8.slider("ต้นทุนพัฒนาอื่นๆ (% ของรายได้)", min_value=0.0, max_value=0.3, value=0.20, step=0.01, key='other_cost_ratio')
+
+    sale_price_per_unit = {'ทาวโฮม': sale_price_th, 'บ้านแฝด': sale_price_ba, 'บ้านเดี่ยว': sale_price_bd}
+    construction_cost_per_unit = {'ทาวโฮม': cost_th, 'บ้านแฝด': cost_ba, 'บ้านเดี่ยว': cost_bd}
+
+    # Input form for new project prediction
+    input_col1, input_col2 = st.columns(2)
+    project_area_input = input_col1.number_input("พื้นที่โครงการ (ตร.วา)",
+                                                 min_value=float(X['พื้นที่โครงการ(ตรม)'].min()),
+                                                 max_value=float(X['พื้นที่โครงการ(ตรม)'].max()),
+                                                 value=float(X['พื้นที่โครงการ(ตรม)'].mean()),
+                                                 step=500.0)
+
+    land_shape_options = X['รูปร่างที่ดิน'].dropna().unique().tolist()
+    land_shape_input = input_col2.selectbox("รูปร่างที่ดิน", land_shape_options)
+
+    grade_options = X['เกรดโครงการ'].dropna().unique().tolist()
+    grade_input = st.selectbox("เกรดโครงการ", grade_options)
+
+    province_options = X['จังหวัด'].dropna().unique().tolist()
+    province_input = st.selectbox("จังหวัด", province_options)
+
+    # Prediction button
+    if st.button("ทำนายผังโครงการ"):
+        if 'model' in locals():
+            with st.spinner('กำลังทำนายผล...'):
+                result_ml = predict_and_analyze(
+                    project_area_input, land_shape_input, grade_input, province_input,
+                    model, house_types, targets, sale_price_per_unit, construction_cost_per_unit,
+                    land_cost_per_sqwah, other_development_cost_ratio, unit_standard_area_sqwah
                 )
-                best_grade_results.append({
-                    'เกรดโครงการ': grade_option,
-                    'จำนวนแปลงรวม (ทำนาย)': predicted_output['จำนวนแปลงรวม'],
-                    'พื้นที่ขาย (ตร.วา) (ทำนาย)': predicted_output['พื้นที่ขาย (ตร.วา)'],
-                    'พื้นที่รวมจากจำนวนแปลง (ตร.วา) (ทำนาย)': predicted_output['พื้นที่รวมจากจำนวนแปลง (ตร.วา)'], # เพิ่ม
-                    'สัดส่วนพื้นที่แปลงที่ใช้จากพื้นที่ขาย (%)': predicted_output['สัดส่วนพื้นที่แปลงที่ใช้จากพื้นที่ขาย (%)'], # เพิ่ม
-                    'รายได้รวม (ทำนาย)': predicted_output['รายได้รวม (ทำนาย)'],
-                    'ต้นทุนรวม (ทำนาย)': predicted_output['ต้นทุนรวม (ทำนาย)'],
-                    'กำไร (ทำนาย)': predicted_output['กำไร (ทำนาย)'],
-                    'จำนวนแปลง (ทาวโฮม) (ทำนาย)': predicted_output.get('จำนวนแปลง (ทาวโฮม)', 0),
-                    'จำนวนแปลง (บ้านแฝด) (ทำนาย)': predicted_output.get('จำนวนแปลง (บ้านแฝด)', 0),
-                    'จำนวนแปลง (บ้านเดี่ยว) (ทำนาย)': predicted_output.get('จำนวนแปลง (บ้านเดี่ยว)', 0),
-                    'พื้นที่สาธารณะ (ตร.วา) (ทำนาย)': predicted_output.get('พื้นที่สาธารณะ (ตร.วา)', 0),
-                    'พื้นที่ถนน (ตร.วา) (ทำนาย)': predicted_output.get('พื้นที่ถนน (ตร.วา)', 0),
-                    'จำนวนซอย (ทำนาย)': predicted_output.get('จำนวนซอย', 0)
-                })
+            
+            st.subheader("🔍 ผลการทำนายจาก ML")
+            # Display results in columns and a dataframe
+            st.dataframe(pd.DataFrame(result_ml.items(), columns=['รายการ', 'ค่าทำนาย']), use_container_width=True)
 
-            results_df = pd.DataFrame(best_grade_results)
-            # Sort by 'กำไร (ทำนาย)' to find the best option for profit
-            results_df_sorted = results_df.sort_values(by='กำไร (ทำนาย)', ascending=False).reset_index(drop=True)
+            # --- Visualizations ---
+            st.subheader("📊 การนำเสนอผลลัพธ์ด้วยภาพ")
+            chart_col1, chart_col2 = st.columns(2)
+            
+            with chart_col1:
+                st.write("#### สัดส่วนการแบ่งพื้นที่")
+                area_data = [
+                    result_ml['พื้นที่ขาย (ตร.วา)'],
+                    result_ml['พื้นที่สาธารณะ (ตร.วา)'],
+                    result_ml['พื้นที่สวน (ตร.วา)'],
+                    result_ml['พื้นที่ถนน (ตร.วา)']
+                ]
+                area_labels = ['พื้นที่ขาย', 'พื้นที่สาธารณะ', 'พื้นที่สวน', 'พื้นที่ถนน']
+                plot_area_pie_chart(area_data, area_labels)
+
+            with chart_col2:
+                st.write("#### จำนวนแปลงบ้าน")
+                house_data = [
+                    result_ml.get('จำนวนแปลง (ทาวโฮม)', 0),
+                    result_ml.get('จำนวนแปลง (บ้านแฝด)', 0),
+                    result_ml.get('จำนวนแปลง (บ้านเดี่ยว)', 0)
+                ]
+                house_labels = ['ทาวน์โฮม', 'บ้านแฝด', 'บ้านเดี่ยว']
+                plot_house_bar_chart(house_data, house_labels)
+            
+            # --- Automated Executive Summary with Gemini API ---
+            st.subheader("📝 สร้าง Executive Summary อัตโนมัติ")
+            if st.button("สร้างสรุปสำหรับผู้บริหารด้วย AI"):
+                with st.spinner('AI กำลังประมวลผล...'):
+                    summary_prompt = f"""
+                    คุณเป็นผู้เชี่ยวชาญด้านอสังหาริมทรัพย์ โปรดเขียน Executive Summary กระชับๆ สำหรับผู้บริหาร โดยอิงจากข้อมูลการทำนายโครงการดังนี้:
+                    - **พื้นที่โครงการทั้งหมด:** {result_ml['พื้นที่โครงการ (ตร.วา)']:,.2f} ตร.วา
+                    - **พื้นที่ขาย:** {result_ml['พื้นที่ขาย (ตร.วา)']:,.2f} ตร.วา
+                    - **จำนวนแปลงรวม:** {result_ml['จำนวนแปลงรวม']:,.0f} ยูนิต
+                    - **แบ่งเป็น:** ทาวน์โฮม {result_ml.get('จำนวนแปลง (ทาวโฮม)', 0):,.0f} หลัง, บ้านแฝด {result_ml.get('จำนวนแปลง (บ้านแฝด)', 0):,.0f} หลัง, บ้านเดี่ยว {result_ml.get('จำนวนแปลง (บ้านเดี่ยว)', 0):,.0f} หลัง
+                    - **กำไรโดยประมาณ:** {result_ml['กำไร (ทำนาย)']:,.2f} บาท
+                    - **สัดส่วนพื้นที่แปลงที่ใช้จากพื้นที่ขาย:** {result_ml.get('สัดส่วนพื้นที่แปลงที่ใช้จากพื้นที่ขาย (%)', 0):,.2f}%
+                    
+                    โปรดสรุปจุดเด่นของผังโครงการนี้และโอกาสทางธุรกิจในเชิงกลยุทธ์.
+                    """
+                    summary_text = call_gemini_api(summary_prompt)
+                    st.markdown("---")
+                    st.markdown("#### Executive Summary จาก AI")
+                    st.write(summary_text)
+
+        else:
+            st.warning("กรุณาฝึกโมเดลก่อนทำนายผล")
+
+    # --- 6. Best Option Analysis ---
+    st.subheader("💡 วิเคราะห์ทางเลือกที่ดีที่สุด (กำไรสูงสุด)")
+    st.markdown("วิเคราะห์เกรดโครงการที่ให้ 'กำไร (ทำนาย)' สูงสุด")
+
+    analysis_land_shape = st.selectbox("รูปร่างที่ดินสำหรับวิเคราะห์", df['รูปร่างที่ดิน'].dropna().unique().tolist(), key='analysis_land_shape')
+    analysis_province = st.selectbox("จังหวัดสำหรับวิเคราะห์", df['จังหวัด'].dropna().unique().tolist(), key='analysis_province')
+    analysis_project_area = st.number_input("พื้นที่โครงการ (ตร.วา)", min_value=1000.0, value=40000.0, step=500.0, key='analysis_project_area')
+
+    if st.button("ค้นหาทางเลือกที่ดีที่สุด"):
+        if 'model' in locals():
+            with st.spinner('กำลังวิเคราะห์ทางเลือกทั้งหมด...'):
+                best_grade_results = []
+                available_grades_for_analysis = df['เกรดโครงการ'].dropna().unique().tolist()
+                for grade_option in available_grades_for_analysis:
+                    predicted_output = predict_and_analyze(
+                        analysis_project_area, analysis_land_shape, grade_option, analysis_province,
+                        model, house_types, targets, sale_price_per_unit, construction_cost_per_unit,
+                        land_cost_per_sqwah, other_development_cost_ratio, unit_standard_area_sqwah
+                    )
+                    predicted_output['เกรดโครงการ'] = grade_option
+                    best_grade_results.append(predicted_output)
+
+                results_df = pd.DataFrame(best_grade_results)
+                results_df_sorted = results_df.sort_values(by='กำไร (ทำนาย)', ascending=False).reset_index(drop=True)
 
             st.write("### ผลการทำนายและจัดอันดับตาม 'กำไร (ทำนาย)'")
             st.dataframe(results_df_sorted, use_container_width=True)
@@ -338,52 +459,9 @@ if df is not None:
             if not results_df_sorted.empty:
                 best_option = results_df_sorted.iloc[0]
                 st.success(f"**ทางเลือกที่ดีที่สุดคือ: เกรดโครงการ '{best_option['เกรดโครงการ']}'** "
-                           f"ซึ่งคาดว่าจะให้ 'กำไร' สูงสุดที่: **{best_option['กำไร (ทำนาย)']}:,.2f บาท**")
+                            f"ซึ่งคาดว่าจะให้ 'กำไร' สูงสุดที่: **{best_option['กำไร (ทำนาย']):,.2f} บาท**")
             else:
-                st.warning("ไม่สามารถระบุทางเลือกที่ดีที่สุดได้จากข้อมูลที่ทำนาย")
+                st.warning("ไม่สามารถระบุทางเลือกที่ดีที่สุดได้")
+        else:
+            st.warning("กรุณาฝึกโมเดลก่อนวิเคราะห์")
 
-    # --- 9. Streamlit UI: Input and Prediction (for single project prediction) ---
-    st.subheader("📈 ทำนายผังโครงการสำหรับโครงการใหม่")
-    st.write("ป้อนข้อมูลโครงการเพื่อทำนายผัง, จำนวนแปลง, รายได้, และกำไร โดยใช้โมเดล Machine Learning.")
-
-    # ใช้ key ที่ไม่ซ้ำกันสำหรับ selectbox ในส่วนนี้
-    project_area_input = st.number_input("พื้นที่โครงการ (ตร.วา)",
-                                         min_value=float(X['พื้นที่โครงการ(ตรม)'].min()) if 'พื้นที่โครงการ(ตรม)' in X.columns and not X['พื้นที่โครงการ(ตรม)'].empty else 1000.0,
-                                         max_value=float(X['พื้นที่โครงการ(ตรม)'].max()) if 'พื้นที่โครงการ(ตรม)' in X.columns and not X['พื้นที่โครงการ(ตรม)'].empty else 100000.0, # Corrected typo here
-                                         value=float(X['พื้นที่โครงการ(ตรม)'].mean()) if 'พื้นที่โครงการ(ตรม)' in X.columns and not X['พื้นที่โครงการ(ตรม)'].empty else 40000.0,
-                                         step=500.0, key='single_predict_project_area')
-
-    land_shape_options = X['รูปร่างที่ดิน'].dropna().unique().tolist() if 'รูปร่างที่ดิน' in X.columns and not X['รูปร่างที่ดิน'].empty else ['ไม่ระบุ']
-    land_shape_input = st.selectbox("รูปร่างที่ดิน", land_shape_options, key='single_predict_land_shape')
-
-    grade_options = X['เกรดโครงการ'].dropna().unique().tolist() if 'เกรดโครงการ' in X.columns and not X['เกรดโครงการ'].empty else ['ไม่ระบุ']
-    grade_input = st.selectbox("เกรดโครงการ", grade_options, key='single_predict_grade')
-
-    province_options = X['จังหวัด'].dropna().unique().tolist() if 'จังหวัด' in X.columns and not X['จังหวัด'].empty else ['ไม่ระบุ']
-    province_input = st.selectbox("จังหวัด", province_options, key='single_predict_province')
-
-    if st.button("ทำนายผังโครงการเฉพาะ"):
-        # Basic validation for selected options
-        if land_shape_input not in land_shape_options or \
-           grade_input not in grade_options or \
-           province_input not in province_options:
-            st.warning("ค่าที่คุณเลือกบางค่าอาจไม่อยู่ในข้อมูลที่ใช้ฝึกโมเดล ผลลัพธ์อาจไม่แม่นยำ")
-
-        result_ml = predict_with_ml(
-            project_area_input,
-            land_shape_input,
-            grade_input,
-            province_input,
-            model,
-            house_types,
-            targets,
-            sale_price_per_unit,       # Pass assumptions
-            construction_cost_per_unit,# Pass assumptions
-            land_cost_per_sqwah,       # Pass assumptions
-            other_development_cost_ratio, # Pass assumptions
-            unit_standard_area_sqwah # Pass standard unit areas
-        )
-        st.subheader("🔍 ผลการทำนายจาก ML (โครงการเฉพาะ)")
-        st.dataframe(pd.DataFrame(result_ml.items(), columns=['รายการ', 'ค่าทำนาย']), use_container_width=True)
-
-        st.info("โปรดทราบ: ค่า MAE และ R² ที่แสดงในแถบด้านข้างคือประสิทธิภาพของโมเดลบนข้อมูลทดสอบ ไม่ใช่ผลลัพธ์จากการทำนายเดี่ยวๆ นี้")
