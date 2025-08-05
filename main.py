@@ -13,6 +13,8 @@ import os
 import requests
 import json
 import base64
+import io
+import wave
 
 # --- API Configuration ---
 # ใส่ API key ของคุณที่นี่ หากคุณต้องการใช้ Gemini API. หากปล่อยว่างไว้ ระบบจะใช้ API Key อัตโนมัติ.
@@ -47,8 +49,8 @@ def call_gemini_api(prompt):
     # Use the default API Key provided by the Canvas environment if not explicitly set.
     api_key_to_use = GEMINI_API_KEY
     if not api_key_to_use:
-        # Assuming the environment provides the key automatically
-        # This part might need to be adjusted based on the execution environment
+        # This part assumes the environment provides the key automatically
+        # which is the case for the Canvas environment
         pass
     
     url = f"{GEMINI_API_URL}?key={api_key_to_use}"
@@ -451,17 +453,17 @@ if df is not None:
                     best_grade_results.append(predicted_output)
 
                 results_df = pd.DataFrame(best_grade_results)
-                results_df_sorted = results_df.sort_values(by='กำไร (ทำนาย)', ascending=False).reset_index(drop=True)
+                if not results_df.empty:
+                    results_df_sorted = results_df.sort_values(by='กำไร (ทำนาย)', ascending=False).reset_index(drop=True)
+                    st.write("### ผลการทำนายและจัดอันดับตาม 'กำไร (ทำนาย)'")
+                    st.dataframe(results_df_sorted, use_container_width=True)
 
-            st.write("### ผลการทำนายและจัดอันดับตาม 'กำไร (ทำนาย)'")
-            st.dataframe(results_df_sorted, use_container_width=True)
-
-            if not results_df_sorted.empty:
-                best_option = results_df_sorted.iloc[0]
-                st.success(f"**ทางเลือกที่ดีที่สุดคือ: เกรดโครงการ '{best_option['เกรดโครงการ']}'** "
-                            f"ซึ่งคาดว่าจะให้ 'กำไร' สูงสุดที่: **{best_option['กำไร (ทำนาย']):,.2f} บาท**")
+                    best_option = results_df_sorted.iloc[0]
+                    st.success(f"**ทางเลือกที่ดีที่สุดคือ: เกรดโครงการ '{best_option['เกรดโครงการ']}'** "
+                                f"ซึ่งคาดว่าจะให้ 'กำไร' สูงสุดที่: **{best_option['กำไร (ทำนาย)']:,.2f} บาท**")
+                else:
+                    st.warning("ไม่สามารถสร้าง DataFrame จากผลลัพธ์ได้")
             else:
                 st.warning("ไม่สามารถระบุทางเลือกที่ดีที่สุดได้")
         else:
             st.warning("กรุณาฝึกโมเดลก่อนวิเคราะห์")
-
