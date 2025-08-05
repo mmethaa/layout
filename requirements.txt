@@ -1,5 +1,5 @@
-pandas
-numpy
-scikit-learn
 streamlit
+pandas
+scikit-learn
 openpyxl
+matplotlib
