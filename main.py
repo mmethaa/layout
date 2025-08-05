@@ -15,6 +15,7 @@ import json
 import base64
 import io
 import wave
+from matplotlib import font_manager as fm
 
 # --- API Configuration ---
 # ใส่ API key ของคุณที่นี่ หากคุณต้องการใช้ Gemini API. หากปล่อยว่างไว้ ระบบจะใช้ API Key อัตโนมัติ.
@@ -193,6 +194,35 @@ def predict_and_analyze(project_area, land_shape, grade, province, ml_model, hou
 # --- Streamlit UI: Main App ---
 st.title("📐 Smart Layout Predictor (ML Powered)")
 st.markdown("โปรดอัปโหลดไฟล์ข้อมูลโครงการของคุณ (layoutdata.xlsx - Sheet1.csv) เพื่อเริ่มต้นการทำนายและวิเคราะห์")
+
+# ----------------------------------------------------
+# -------------------- NEW CODE ----------------------
+# ----------------------------------------------------
+# This block attempts to set a Thai font for matplotlib.
+# It checks for common fonts and uses a fallback if none are found.
+st.markdown("---")
+st.info("💡 App is attempting to set a Thai font for charts. If you still see squares, please ensure a Thai font is installed on the system.")
+try:
+    # Find a Thai font
+    thai_fonts = ['Tahoma', 'Sarabun', 'TH SarabunPSK', 'AngsanaUPC', 'CordiaUPC']
+    thai_font_path = None
+    for font_name in thai_fonts:
+        try:
+            thai_font_path = fm.findfont(fm.FontProperties(family=font_name))
+            if thai_font_path:
+                plt.rcParams['font.family'] = font_name
+                st.success(f"ใช้ฟอนต์ '{font_name}' สำหรับภาษาไทยในกราฟ")
+                break
+        except Exception:
+            continue
+    if not thai_font_path:
+        st.warning("ไม่พบฟอนต์ที่รองรับภาษาไทยในระบบ ใช้ฟอนต์เริ่มต้น")
+
+except Exception as e:
+    st.error(f"เกิดข้อผิดพลาดในการตั้งค่าฟอนต์: {e}")
+# ----------------------------------------------------
+# -------------------- END NEW CODE ------------------
+# ----------------------------------------------------
 
 # --- 1. File Uploader and Data Loading ---
 uploaded_file = st.file_uploader("เลือกไฟล์ CSV หรือ Excel (Sheet1.csv)", type=["csv", "xlsx"])
