@@ -12,9 +12,6 @@ import joblib
 import os
 import requests
 import json
-import base64
-import io
-import wave
 from matplotlib import font_manager as fm
 
 # --- API Configuration ---
@@ -26,6 +23,7 @@ GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini
 MODEL_PATH = "random_forest_model.joblib"
 # คำเตือน: Streamlit Cloud ไม่สามารถใช้ไฟล์ที่เก็บในเครื่องได้ ถ้าใช้งานบนคลาวด์อาจต้องปรับวิธี
 # การเก็บไฟล์หรือใช้ Streamlit's caching mechanisms แทน.
+THAI_FONT_FILE = "Sarabun-Regular.ttf" # A font file is needed for consistent display
 
 # --- Helper Functions ---
 def call_gemini_api(prompt):
@@ -73,26 +71,6 @@ def call_gemini_api(prompt):
         st.error(f"เกิดข้อผิดพลาดที่ไม่คาดคิด: {e}")
         return "ไม่สามารถสร้างสรุปได้ เนื่องจากเกิดข้อผิดพลาดที่ไม่คาดคิด"
 
-def pcm_to_wav(pcm_data, sample_rate=16000):
-    """
-    Converts raw PCM audio data (bytes) into a WAV format blob.
-    
-    Args:
-        pcm_data (bytes): The raw PCM audio data.
-        sample_rate (int): The sample rate of the audio.
-    
-    Returns:
-        bytes: A bytes object containing the WAV file data.
-    """
-    with io.BytesIO() as wav_file:
-        wav_writer = wave.open(wav_file, 'wb')
-        wav_writer.setnchannels(1)  # Mono
-        wav_writer.setsampwidth(2)   # 16-bit
-        wav_writer.setframerate(sample_rate)
-        wav_writer.writeframes(pcm_data)
-        wav_writer.close()
-        return wav_file.getvalue()
-
 def plot_area_pie_chart(data, labels):
     """
     Generates and displays a pie chart for area breakdown.
@@ -102,27 +80,70 @@ def plot_area_pie_chart(data, labels):
     ax.axis('equal') # Equal aspect ratio ensures that pie is drawn as a circle.
     st.pyplot(fig)
 
-def plot_house_bar_chart(data, labels):
+# UPDATED: This function now dynamically generates a bar chart for all house types with non-zero counts.
+def plot_house_bar_chart(result_ml, house_types_list):
     """
-    Generates and displays a bar chart for house types.
+    Generates and displays a bar chart for house types with non-zero counts.
     """
-    fig, ax = plt.subplots()
-    ax.bar(labels, data, color=['#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd'])
-    ax.set_ylabel('จำนวนแปลง')
-    ax.set_title('จำนวนแปลงบ้านแต่ละประเภท')
-    st.pyplot(fig)
+    house_data = []
+    house_labels = []
+    for h_type in house_types_list:
+        count = result_ml.get(f'จำนวนแปลง ({h_type})', 0)
+        if count > 0:
+            house_data.append(count)
+            house_labels.append(h_type)
 
+    if house_data:
+        fig, ax = plt.subplots()
+        ax.bar(house_labels, house_data, color=['#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd', '#f97316'])
+        ax.set_ylabel('จำนวนแปลง')
+        ax.set_title('จำนวนแปลงบ้านแต่ละประเภท')
+        st.pyplot(fig)
+    else:
+        st.warning("ไม่มีข้อมูลจำนวนแปลงบ้านที่ทำนายได้")
+
+# This function checks and corrects house type predictions based on historical data.
+def get_historically_present_house_types(df, grade_input, all_house_types):
+    """
+    Checks the original dataframe to see which house types are actually present for a given grade.
+    Returns a set of house types with non-zero counts.
+    """
+    grade_df = df[df['เกรดโครงการ'] == grade_input]
+    present_house_types = set()
+    for h_type in all_house_types: # Use all_house_types to check all possible columns
+        if h_type in grade_df.columns and grade_df[h_type].sum() > 0:
+            present_house_types.add(h_type)
+    return present_house_types
+
+# Corrected predict_and_analyze function
 def predict_and_analyze(project_area, land_shape, grade, province, ml_model, house_types_list, target_cols,
                         sale_prices, construct_costs, land_cost_sqwah, other_dev_ratio,
-                        unit_standard_area_sqwah_dict):
+                        unit_standard_area_sqwah_dict, df_original, excluded_house_types):
     """
-    Performs a prediction using the trained ML model and calculates financial metrics.
+    Performs a prediction using the trained ML model, applies a correction for house types,
+    and calculates financial metrics.
     """
     input_data = pd.DataFrame([[project_area, land_shape, grade, province]],
                               columns=['พื้นที่โครงการ(ตรม)', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด'])
 
+    # Get the initial prediction from the ML model
     predicted_values = ml_model.predict(input_data)[0]
-    predicted_dict = {target: value for target, value in zip(target_cols, predicted_values)}
+    # CORRECTION: The variable name 'value' was incorrect. It should be 'target_value'.
+    predicted_dict = {target: target_value for target, target_value in zip(target_cols, predicted_values)}
+
+    # NEW: Correct the predicted house type counts based on historical data
+    # Pass house_types_list (which is all possible house types) to get_historically_present_house_types
+    historically_present_types = get_historically_present_house_types(df_original, grade, house_types_list)
+    for h_type in house_types_list:
+        if h_type not in historically_present_types:
+            # If a house type is not historically present for this grade, force its prediction to 0
+            if h_type in predicted_dict:
+                predicted_dict[h_type] = 0
+        # NEW: Apply explicit exclusion from user input
+        if h_type in excluded_house_types:
+            if h_type in predicted_dict:
+                predicted_dict[h_type] = 0
+
 
     result = {
         'พื้นที่โครงการ (ตร.วา)': round(project_area, 2),
@@ -195,39 +216,38 @@ def predict_and_analyze(project_area, land_shape, grade, province, ml_model, hou
 st.title("📐 Smart Layout Predictor (ML Powered)")
 st.markdown("โปรดอัปโหลดไฟล์ข้อมูลโครงการของคุณ (layoutdata.xlsx - Sheet1.csv) เพื่อเริ่มต้นการทำนายและวิเคราะห์")
 
-# ----------------------------------------------------
-# -------------------- NEW CODE ----------------------
-# ----------------------------------------------------
-# This block attempts to set a Thai font for matplotlib.
-# It checks for common fonts and uses a fallback if none are found.
 st.markdown("---")
-st.info("💡 App is attempting to set a Thai font for charts. If you still see squares, please ensure a Thai font is installed on the system.")
+# UPDATED: Improved Thai font handling
+st.info("💡 App is attempting to set a Thai font for charts. It will first try to use an embedded font file, then fall back to system fonts.")
 try:
-    # Find a Thai font
-    thai_fonts = ['Tahoma', 'Sarabun', 'TH SarabunPSK', 'AngsanaUPC', 'CordiaUPC']
-    thai_font_path = None
-    for font_name in thai_fonts:
-        try:
-            font_path_candidate = fm.findfont(fm.FontProperties(family=font_name))
-            if font_path_candidate:
-                thai_font_path = font_path_candidate
-                break
-        except Exception:
-            continue
-    
-    if thai_font_path:
-        fm.fontManager.addfont(thai_font_path)
-        plt.rcParams['font.family'] = fm.FontProperties(fname=thai_font_path).get_name()
-        plt.rcParams['axes.unicode_minus'] = False # Fix for minus signs in Thai font
-        st.success(f"ใช้ฟอนต์ '{plt.rcParams['font.family']}' สำหรับภาษาไทยในกราฟ")
+    # First, try to use a specific font file included with the app
+    if os.path.exists(THAI_FONT_FILE):
+        fm.fontManager.addfont(THAI_FONT_FILE)
+        plt.rcParams['font.family'] = fm.FontProperties(fname=THAI_FONT_FILE).get_name()
+        st.success(f"ใช้ฟอนต์ '{plt.rcParams['font.family']}' จากไฟล์สำหรับภาษาไทยในกราฟ")
     else:
-        st.warning("ไม่พบฟอนต์ที่รองรับภาษาไทยในระบบ ใช้ฟอนต์เริ่มต้น")
+        # If the file is not found, fall back to searching for system fonts
+        thai_fonts = ['Tahoma', 'Sarabun', 'TH SarabunPSK', 'AngsanaUPC', 'CordiaUPC']
+        thai_font_path = None
+        for font_name in thai_fonts:
+            try:
+                font_path_candidate = fm.findfont(fm.FontProperties(family=font_name))
+                if font_path_candidate:
+                    thai_font_path = font_path_candidate
+                    break
+            except Exception:
+                continue
+        
+        if thai_font_path:
+            fm.fontManager.addfont(thai_font_path)
+            plt.rcParams['font.family'] = fm.FontProperties(fname=thai_font_path).get_name()
+            st.success(f"ใช้ฟอนต์ '{plt.rcParams['font.family']}' ที่พบในระบบสำหรับภาษาไทยในกราฟ")
+        else:
+            st.warning("ไม่พบฟอนต์ที่รองรับภาษาไทยในระบบ ใช้ฟอนต์เริ่มต้น")
 
+    plt.rcParams['axes.unicode_minus'] = False # Fix for minus signs in Thai font
 except Exception as e:
     st.error(f"เกิดข้อผิดพลาดในการตั้งค่าฟอนต์: {e}")
-# ----------------------------------------------------
-# -------------------- END NEW CODE ------------------
-# ----------------------------------------------------
 
 # --- 1. File Uploader and Data Loading ---
 uploaded_file = st.file_uploader("เลือกไฟล์ CSV หรือ Excel (Sheet1.csv)", type=["csv", "xlsx"])
@@ -238,7 +258,6 @@ if uploaded_file:
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         elif uploaded_file.name.endswith('.xlsx'):
-            # This requires 'openpyxl' to be installed
             df = pd.read_excel(uploaded_file, sheet_name='Sheet1')
         df.columns = df.columns.str.strip()
         st.success("โหลดข้อมูลสำเร็จแล้ว!")
@@ -251,6 +270,9 @@ else:
 
 # --- Continue only if df is loaded ---
 if df is not None:
+    # Store the original dataframe for the new correction logic
+    df_original = df.copy()
+
     # --- 2. Data Preprocessing & Model Setup ---
     sqm_to_sqwah = 0.25
     columns_to_convert = ['พื้นที่โครงการ(ตรม)', 'พื้นที่จัดจำหน่าย(ตรม)', 'พื้นที่สาธา(ตรม)', 'พื้นที่ถนนรวม', 'พื้นที่สวน(5%ของพื้นที่จัดจำหน่าย)']
@@ -261,12 +283,15 @@ if df is not None:
     unit_standard_area_sqm = {
         'ทาวโฮม': 5 * 16,
         'บ้านแฝด': 10 * 16,
-        'บ้านเดี่ยว': 15 * 18
+        'บ้านเดี่ยว': 15 * 18,
+        'บ้านเดี่ยว3ชั้น': 15 * 18,
+        'อาคารพาณิชย์': 5 * 16
     }
     unit_standard_area_sqwah = {
         h_type: area_sqm * sqm_to_sqwah for h_type, area_sqm in unit_standard_area_sqm.items()
     }
-    house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว']
+    # Adjusted house_types list to match the updated unit_standard_area_sqm dictionary
+    house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
 
     features = ['พื้นที่โครงการ(ตรม)', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด']
     targets = ['พื้นที่จัดจำหน่าย(ตรม)', 'จำนวนหลัง', 'จำนวนซอย', 'พื้นที่ถนนรวม', 'พื้นที่สาธา(ตรม)']
@@ -314,24 +339,25 @@ if df is not None:
     if os.path.exists(MODEL_PATH):
         st.sidebar.success("โหลดโมเดลจากไฟล์สำเร็จแล้ว!")
         model = joblib.load(MODEL_PATH)
-        run_tuning = st.sidebar.checkbox("ต้องการปรับจูนโมเดล (Hyperparameter Tuning) ใหม่?")
+        run_tuning = st.sidebar.checkbox("ต้องการปรับจูนโมเดล (Hyperparameter Tuning) ใหม่?", value=False)
     else:
         st.sidebar.info("ยังไม่มีไฟล์โมเดล โมเดลจะถูกฝึกและบันทึกในครั้งแรก.")
         run_tuning = st.sidebar.checkbox("ต้องการปรับจูนโมเดลใหม่หรือไม่?", value=True)
     
     if st.sidebar.button("ฝึก/ปรับจูนโมเดล") or not os.path.exists(MODEL_PATH) and model is None:
         if run_tuning:
-            st.sidebar.subheader("กำลังปรับจูน Hyperparameter...")
+            st.sidebar.subheader("กำลังปรับจูน Hyperparameter เพื่อเพิ่มประสิทธิภาพ R² ...")
             with st.spinner('กำลังค้นหา Hyperparameter ที่ดีที่สุด...'):
                 pipeline = Pipeline(steps=[('preprocessor', preprocessor),
                                            ('regressor', RandomForestRegressor(random_state=42, n_jobs=-1))])
                 
                 param_grid = {
-                    'regressor__n_estimators': [100, 200, 300],
-                    'regressor__max_depth': [5, 10, None]
+                    'regressor__n_estimators': [100, 200, 300, 400],
+                    'regressor__max_depth': [5, 10, 15, None],
+                    'regressor__min_samples_split': [2, 5, 10]
                 }
                 
-                grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='r2', n_jobs=-1)
+                grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='r2', n_jobs=-1, verbose=1)
                 grid_search.fit(X_train, y_train)
                 model = grid_search.best_estimator_
                 
@@ -339,13 +365,12 @@ if df is not None:
         else:
             st.sidebar.subheader("กำลังฝึกโมเดล...")
             with st.spinner('กำลังฝึกโมเดล RandomForestRegressor...'):
-                regressor = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+                regressor = RandomForestRegressor(n_estimators=300, max_depth=10, random_state=42, n_jobs=-1)
                 model = Pipeline(steps=[('preprocessor', preprocessor),
                                        ('regressor', regressor)])
                 model.fit(X_train, y_train)
             st.sidebar.success("ฝึกโมเดลสำเร็จ!")
         
-        # Save the trained model
         try:
             joblib.dump(model, MODEL_PATH)
             st.sidebar.info("บันทึกโมเดลแล้ว!")
@@ -367,25 +392,30 @@ if df is not None:
     st.subheader("📈 ทำนายผังโครงการสำหรับโครงการใหม่")
     st.markdown("ป้อนข้อมูลโครงการเพื่อทำนายผัง, จำนวนแปลง, รายได้, และกำไร")
 
-    # Use st.expander for a cleaner UI
     with st.expander("สมมติฐานราคาและต้นทุน", expanded=False):
         st.markdown("ค่าเหล่านี้จะใช้สำหรับคำนวณรายได้และกำไร")
         col1, col2, col3 = st.columns(3)
         sale_price_th = col1.number_input("ราคาขาย ทาวน์โฮม (บาท)", value=2_500_000, step=100_000, key='sale_th')
         sale_price_ba = col2.number_input("ราคาขาย บ้านแฝด (บาท)", value=4_000_000, step=100_000, key='sale_ba')
         sale_price_bd = col3.number_input("ราคาขาย บ้านเดี่ยว (บาท)", value=6_000_000, step=100_000, key='sale_bd')
+        # Additional house types for assumption
+        sale_price_bd3 = st.number_input("ราคาขาย บ้านเดี่ยว3ชั้น (บาท)", value=9_000_000, step=100_000, key='sale_bd3')
+        sale_price_comm = st.number_input("ราคาขาย อาคารพาณิชย์ (บาท)", value=5_000_000, step=100_000, key='sale_comm')
 
         col4, col5, col6 = st.columns(3)
         cost_th = col4.number_input("ต้นทุน ทาวน์โฮม (บาท)", value=1_500_000, step=50_000, key='cost_th')
         cost_ba = col5.number_input("ต้นทุน บ้านแฝด (บาท)", value=2_500_000, step=50_000, key='cost_ba')
         cost_bd = col6.number_input("ต้นทุน บ้านเดี่ยว (บาท)", value=3_500_000, step=50_000, key='cost_bd')
+        # Additional house types for assumption
+        cost_bd3 = st.number_input("ต้นทุน บ้านเดี่ยว3ชั้น (บาท)", value=5_500_000, step=50_000, key='cost_bd3')
+        cost_comm = st.number_input("ต้นทุน อาคารพาณิชย์ (บาท)", value=3_000_000, step=50_000, key='cost_comm')
 
         col7, col8 = st.columns(2)
         land_cost_per_sqwah = col7.number_input("ต้นทุนที่ดิน (บาท/ตร.วา)", value=50000, step=1000, key='land_cost')
         other_development_cost_ratio = col8.slider("ต้นทุนพัฒนาอื่นๆ (% ของรายได้)", min_value=0.0, max_value=0.3, value=0.20, step=0.01, key='other_cost_ratio')
 
-    sale_price_per_unit = {'ทาวโฮม': sale_price_th, 'บ้านแฝด': sale_price_ba, 'บ้านเดี่ยว': sale_price_bd}
-    construction_cost_per_unit = {'ทาวโฮม': cost_th, 'บ้านแฝด': cost_ba, 'บ้านเดี่ยว': cost_bd}
+    sale_price_per_unit = {'ทาวโฮม': sale_price_th, 'บ้านแฝด': sale_price_ba, 'บ้านเดี่ยว': sale_price_bd, 'บ้านเดี่ยว3ชั้น': sale_price_bd3, 'อาคารพาณิชย์': sale_price_comm}
+    construction_cost_per_unit = {'ทาวโฮม': cost_th, 'บ้านแฝด': cost_ba, 'บ้านเดี่ยว': cost_bd, 'บ้านเดี่ยว3ชั้น': cost_bd3, 'อาคารพาณิชย์': cost_comm}
 
     # Input form for new project prediction
     input_col1, input_col2 = st.columns(2)
@@ -404,21 +434,26 @@ if df is not None:
     province_options = X['จังหวัด'].dropna().unique().tolist()
     province_input = st.selectbox("จังหวัด", province_options)
 
-    # Prediction button
+    # NEW: Option to exclude specific house types from prediction
+    excluded_house_types_input = st.multiselect(
+        "ประเภทบ้านที่ไม่ต้องการให้ทำนาย (เลือกได้หลายประเภท)",
+        options=house_types,
+        default=[]
+    )
+
     if st.button("ทำนายผังโครงการ"):
         if model is not None:
             with st.spinner('กำลังทำนายผล...'):
                 result_ml = predict_and_analyze(
                     project_area_input, land_shape_input, grade_input, province_input,
                     model, house_types, targets, sale_price_per_unit, construction_cost_per_unit,
-                    land_cost_per_sqwah, other_development_cost_ratio, unit_standard_area_sqwah
+                    land_cost_per_sqwah, other_development_cost_ratio, unit_standard_area_sqwah, df_original,
+                    excluded_house_types_input # Pass the excluded types
                 )
             
             st.subheader("🔍 ผลการทำนายจาก ML")
-            # Display results in columns and a dataframe
             st.dataframe(pd.DataFrame(result_ml.items(), columns=['รายการ', 'ค่าทำนาย']), use_container_width=True)
 
-            # --- Visualizations ---
             st.subheader("📊 การนำเสนอผลลัพธ์ด้วยภาพ")
             chart_col1, chart_col2 = st.columns(2)
             
@@ -435,15 +470,9 @@ if df is not None:
 
             with chart_col2:
                 st.write("#### จำนวนแปลงบ้าน")
-                house_data = [
-                    result_ml.get('จำนวนแปลง (ทาวโฮม)', 0),
-                    result_ml.get('จำนวนแปลง (บ้านแฝด)', 0),
-                    result_ml.get('จำนวนแปลง (บ้านเดี่ยว)', 0)
-                ]
-                house_labels = ['ทาวน์โฮม', 'บ้านแฝด', 'บ้านเดี่ยว']
-                plot_house_bar_chart(house_data, house_labels)
+                # UPDATED: Call the new, more dynamic bar chart function
+                plot_house_bar_chart(result_ml, house_types)
             
-            # --- Automated Executive Summary with Gemini API ---
             st.subheader("📝 สร้าง Executive Summary อัตโนมัติ")
             if st.button("สร้างสรุปสำหรับผู้บริหารด้วย AI"):
                 with st.spinner('AI กำลังประมวลผล...'):
@@ -480,10 +509,14 @@ if df is not None:
                 best_grade_results = []
                 available_grades_for_analysis = df['เกรดโครงการ'].dropna().unique().tolist()
                 for grade_option in available_grades_for_analysis:
+                    # For best option analysis, we don't apply explicit exclusion by default
+                    # as we want to see the full potential of each grade.
+                    # If the user wants to exclude for this analysis, they'd need a separate control.
                     predicted_output = predict_and_analyze(
                         analysis_project_area, analysis_land_shape, grade_option, analysis_province,
                         model, house_types, targets, sale_price_per_unit, construction_cost_per_unit,
-                        land_cost_per_sqwah, other_development_cost_ratio, unit_standard_area_sqwah
+                        land_cost_per_sqwah, other_development_cost_ratio, unit_standard_area_sqwah, df_original,
+                        [] # No explicit exclusion for best option analysis
                     )
                     predicted_output['เกรดโครงการ'] = grade_option
                     best_grade_results.append(predicted_output)
