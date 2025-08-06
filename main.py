@@ -25,6 +25,37 @@ MODEL_PATH = "random_forest_model.joblib"
 # การเก็บไฟล์หรือใช้ Streamlit's caching mechanisms แทน.
 THAI_FONT_FILE = "Sarabun-Regular.ttf" # A font file is needed for consistent display
 
+# --- Project Grade Mapping ---
+# IMPORTANT: Adjust this mapping based on your actual 'เกรดโครงการ' values in layoutdata.xlsx
+# and how you want them categorized into 'สูง', 'กลาง', 'ต่ำ'.
+# If a grade from your data is not in this dictionary, it will be filled with the mode (most frequent) grade.
+grade_mapping = {
+    'BELLA': 'ต่ำ',
+    'PARKVILLE': 'กลาง',
+    'PALMSPRING': 'สูง',
+    # Add more mappings as needed, e.g.:
+    # 'LUXURY': 'สูง',
+    # 'STANDARD': 'กลาง',
+    # 'ECONOMY': 'ต่ำ',
+    # 'PREMIUM': 'สูง',
+    # 'AFFORDABLE': 'ต่ำ',
+}
+# Reverse mapping for historical lookup
+mapped_grade_to_original_grades = {}
+for original_grade, mapped_grade in grade_mapping.items():
+    if mapped_grade not in mapped_grade_to_original_grades:
+        mapped_grade_to_original_grades[mapped_grade] = []
+    mapped_grade_to_original_grades[mapped_grade].append(original_grade)
+
+# --- Color Palettes for Grades ---
+# Define color palettes for each grade category
+grade_color_palettes = {
+    'สูง': ['#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd'],  # Blue tones for High Grade
+    'กลาง': ['#059669', '#10b981', '#34d399', '#6ee7b7'],  # Green tones for Medium Grade
+    'ต่ำ': ['#ea580c', '#f97316', '#fbbf24', '#fcd34d']   # Orange/Yellow tones for Low Grade
+}
+
+
 # --- Helper Functions ---
 def call_gemini_api(prompt):
     """
@@ -71,19 +102,21 @@ def call_gemini_api(prompt):
         st.error(f"เกิดข้อผิดพลาดที่ไม่คาดคิด: {e}")
         return "ไม่สามารถสร้างสรุปได้ เนื่องจากเกิดข้อผิดพลาดที่ไม่คาดคิด"
 
-def plot_area_pie_chart(data, labels):
+# UPDATED: plot_area_pie_chart now accepts grade_input for color selection
+def plot_area_pie_chart(data, labels, grade_input):
     """
-    Generates and displays a pie chart for area breakdown.
+    Generates and displays a pie chart for area breakdown, with colors based on grade.
     """
+    colors_to_use = grade_color_palettes.get(grade_input, ['#1d4ed8', '#60a5fa', '#34d399', '#fbbf24']) # Default colors if grade not found
     fig, ax = plt.subplots()
-    ax.pie(data, labels=labels, autopct='%1.1f%%', startangle=90, colors=['#1d4ed8', '#60a5fa', '#34d399', '#fbbf24'])
+    ax.pie(data, labels=labels, autopct='%1.1f%%', startangle=90, colors=colors_to_use)
     ax.axis('equal') # Equal aspect ratio ensures that pie is drawn as a circle.
     st.pyplot(fig)
 
-# UPDATED: This function now dynamically generates a bar chart for all house types with non-zero counts.
-def plot_house_bar_chart(result_ml, house_types_list):
+# UPDATED: plot_house_bar_chart now accepts grade_input for color selection
+def plot_house_bar_chart(result_ml, house_types_list, grade_input):
     """
-    Generates and displays a bar chart for house types with non-zero counts.
+    Generates and displays a bar chart for house types with non-zero counts, with colors based on grade.
     """
     house_data = []
     house_labels = []
@@ -94,8 +127,14 @@ def plot_house_bar_chart(result_ml, house_types_list):
             house_labels.append(h_type)
 
     if house_data:
+        colors_to_use = grade_color_palettes.get(grade_input, ['#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd', '#f97316']) # Default colors if grade not found
+        # Extend colors if there are more house types than predefined colors
+        if len(house_labels) > len(colors_to_use):
+            # Simple extension, could be more sophisticated for larger palettes
+            colors_to_use.extend(['#cccccc'] * (len(house_labels) - len(colors_to_use)))
+
         fig, ax = plt.subplots()
-        ax.bar(house_labels, house_data, color=['#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd', '#f97316'])
+        ax.bar(house_labels, house_data, color=colors_to_use[:len(house_labels)]) # Ensure colors match number of bars
         ax.set_ylabel('จำนวนแปลง')
         ax.set_title('จำนวนแปลงบ้านแต่ละประเภท')
         st.pyplot(fig)
@@ -103,12 +142,19 @@ def plot_house_bar_chart(result_ml, house_types_list):
         st.warning("ไม่มีข้อมูลจำนวนแปลงบ้านที่ทำนายได้")
 
 # This function checks and corrects house type predictions based on historical data.
-def get_historically_present_house_types(df, grade_input, all_house_types):
+def get_historically_present_house_types(df_original, mapped_grade_input, all_house_types, mapped_to_original_grades_dict):
     """
-    Checks the original dataframe to see which house types are actually present for a given grade.
+    Checks the original dataframe to see which house types are actually present for a given mapped grade.
+    Filters df_original by all original grades that map to the mapped_grade_input.
     Returns a set of house types with non-zero counts.
     """
-    grade_df = df[df['เกรดโครงการ'] == grade_input]
+    original_grades_for_this_mapped_grade = mapped_to_original_grades_dict.get(mapped_grade_input, [])
+    if not original_grades_for_this_mapped_grade:
+        return set() # No original grades found for this mapped grade
+
+    # Filter df_original by the original grades that correspond to the selected mapped grade
+    grade_df = df_original[df_original['เกรดโครงการ'].isin(original_grades_for_this_mapped_grade)]
+    
     present_house_types = set()
     for h_type in all_house_types: # Use all_house_types to check all possible columns
         if h_type in grade_df.columns and grade_df[h_type].sum() > 0:
@@ -118,28 +164,27 @@ def get_historically_present_house_types(df, grade_input, all_house_types):
 # Corrected predict_and_analyze function
 def predict_and_analyze(project_area, land_shape, grade, province, ml_model, house_types_list, target_cols,
                         sale_prices, construct_costs, land_cost_sqwah, other_dev_ratio,
-                        unit_standard_area_sqwah_dict, df_original, excluded_house_types):
+                        unit_standard_area_sqwah_dict, df_original, excluded_house_types, mapped_to_original_grades_dict):
     """
     Performs a prediction using the trained ML model, applies a correction for house types,
     and calculates financial metrics.
     """
+    # The input 'grade' here is already the mapped grade ('สูง', 'กลาง', 'ต่ำ')
     input_data = pd.DataFrame([[project_area, land_shape, grade, province]],
                               columns=['พื้นที่โครงการ(ตรม)', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด'])
 
     # Get the initial prediction from the ML model
     predicted_values = ml_model.predict(input_data)[0]
-    # CORRECTION: The variable name 'value' was incorrect. It should be 'target_value'.
     predicted_dict = {target: target_value for target, target_value in zip(target_cols, predicted_values)}
 
-    # NEW: Correct the predicted house type counts based on historical data
-    # Pass house_types_list (which is all possible house types) to get_historically_present_house_types
-    historically_present_types = get_historically_present_house_types(df_original, grade, house_types_list)
+    # Correct the predicted house type counts based on historical data of ORIGINAL grades
+    historically_present_types = get_historically_present_house_types(df_original, grade, house_types_list, mapped_to_original_grades_dict)
     for h_type in house_types_list:
         if h_type not in historically_present_types:
             # If a house type is not historically present for this grade, force its prediction to 0
             if h_type in predicted_dict:
                 predicted_dict[h_type] = 0
-        # NEW: Apply explicit exclusion from user input
+        # Apply explicit exclusion from user input
         if h_type in excluded_house_types:
             if h_type in predicted_dict:
                 predicted_dict[h_type] = 0
@@ -290,7 +335,6 @@ if df is not None:
     unit_standard_area_sqwah = {
         h_type: area_sqm * sqm_to_sqwah for h_type, area_sqm in unit_standard_area_sqm.items()
     }
-    # Adjusted house_types list to match the updated unit_standard_area_sqm dictionary
     house_types = ['ทาวโฮม', 'บ้านแฝด', 'บ้านเดี่ยว', 'บ้านเดี่ยว3ชั้น', 'อาคารพาณิชย์']
 
     features = ['พื้นที่โครงการ(ตรม)', 'รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด']
@@ -306,10 +350,27 @@ if df is not None:
         st.error("ไม่พบ Features หรือ Targets ที่ใช้ในการเทรนโมเดล")
         st.stop()
 
+    # Apply grade mapping to the dataframe used for training
+    if 'เกรดโครงการ' in df.columns:
+        # Fill NaN before mapping if any, using the original mode
+        original_grade_mode = df['เกรดโครงการ'].mode()[0]
+        df['เกรดโครงการ'] = df['เกรดโครงการ'].fillna(original_grade_mode)
+        
+        # Apply the mapping. If a grade is not in grade_mapping, it will become NaN.
+        df['เกรดโครงการ'] = df['เกรดโครงการ'].map(grade_mapping)
+        
+        # Fill any NaNs that resulted from mapping (i.e., original grades not in grade_mapping)
+        mapped_grade_options = ['สูง', 'กลาง', 'ต่ำ']
+        if not df['เกรดโครงการ'].dropna().empty:
+            mapped_grade_mode = df['เกรดโครงการ'].mode()[0]
+            df['เกรดโครงการ'] = df['เกรดโครงการ'].fillna(mapped_grade_mode)
+        else:
+            df['เกรดโครงการ'] = df['เกรดโครงการ'].fillna('กลาง') # Default to 'กลาง'
+        
     X = df[features].copy()
     y = df[targets].copy()
 
-    for col in ['รูปร่างที่ดิน', 'เกรดโครงการ', 'จังหวัด']:
+    for col in ['รูปร่างที่ดิน', 'จังหวัด']: # 'เกรดโครงการ' is handled by mapping now
         if col in X.columns and X[col].isnull().any():
             mode_val = X[col].mode()[0]
             X.loc[:, col] = X[col].fillna(mode_val)
@@ -344,7 +405,16 @@ if df is not None:
         st.sidebar.info("ยังไม่มีไฟล์โมเดล โมเดลจะถูกฝึกและบันทึกในครั้งแรก.")
         run_tuning = st.sidebar.checkbox("ต้องการปรับจูนโมเดลใหม่หรือไม่?", value=True)
     
-    if st.sidebar.button("ฝึก/ปรับจูนโมเดล") or not os.path.exists(MODEL_PATH) and model is None:
+    st.sidebar.markdown("""
+        ---
+        **คำแนะนำเพื่อเพิ่มความแม่นยำของโมเดล:**
+        1. **Hyperparameter Tuning:** กด 'ฝึก/ปรับจูนโมเดล' โดยเลือก 'ปรับจูนโมเดลใหม่' เพื่อค้นหาค่าที่ดีที่สุด.
+        2. **เพิ่มข้อมูล:** ยิ่งมีข้อมูลโครงการมากเท่าไหร่ โมเดลก็จะยิ่งเรียนรู้ได้ดีขึ้น.
+        3. **Feature Engineering:** ลองสร้างฟีเจอร์ใหม่ๆ จากข้อมูลที่มี เช่น สัดส่วนพื้นที่ขายต่อพื้นที่โครงการ.
+        4. **เปลี่ยนโมเดล:** ลองใช้โมเดลอื่นที่ไม่ใช่ Random Forest เช่น Gradient Boosting Machines (LightGBM, XGBoost).
+    """)
+
+    if st.sidebar.button("ฝึก/ปรับจูนโมเดล") or (not os.path.exists(MODEL_PATH) and model is None):
         if run_tuning:
             st.sidebar.subheader("กำลังปรับจูน Hyperparameter เพื่อเพิ่มประสิทธิภาพ R² ...")
             with st.spinner('กำลังค้นหา Hyperparameter ที่ดีที่สุด...'):
@@ -353,8 +423,9 @@ if df is not None:
                 
                 param_grid = {
                     'regressor__n_estimators': [100, 200, 300, 400],
-                    'regressor__max_depth': [5, 10, 15, None],
-                    'regressor__min_samples_split': [2, 5, 10]
+                    'regressor__max_depth': [5, 10, 15, 20, None],
+                    'regressor__min_samples_split': [2, 5, 10],
+                    'regressor__min_samples_leaf': [1, 2, 4]
                 }
                 
                 grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='r2', n_jobs=-1, verbose=1)
@@ -382,9 +453,14 @@ if df is not None:
         st.sidebar.subheader("📊 ประสิทธิภาพโมเดล (บนข้อมูลทดสอบ)")
         try:
             y_pred_test = model.predict(X_test)
+            r2_score_value = r2_score(y_test, y_pred_test)
             st.sidebar.write("**ประสิทธิภาพรวม**")
             st.sidebar.markdown(f"- **MAE เฉลี่ย:** {mean_absolute_error(y_test, y_pred_test):,.2f}")
-            st.sidebar.markdown(f"- **R² เฉลี่ย:** {r2_score(y_test, y_pred_test):.4f}")
+            st.sidebar.markdown(f"- **R² เฉลี่ย:** {r2_score_value:.4f}")
+            
+            if r2_score_value < 0.5:
+                st.sidebar.warning("ประสิทธิภาพของโมเดลยังต่ำ ควรพิจารณาปรับจูน Hyperparameter หรือเพิ่มข้อมูล")
+
         except Exception as e:
             st.sidebar.error(f"เกิดข้อผิดพลาดในการประเมินโมเดล: {e}")
 
@@ -398,7 +474,6 @@ if df is not None:
         sale_price_th = col1.number_input("ราคาขาย ทาวน์โฮม (บาท)", value=2_500_000, step=100_000, key='sale_th')
         sale_price_ba = col2.number_input("ราคาขาย บ้านแฝด (บาท)", value=4_000_000, step=100_000, key='sale_ba')
         sale_price_bd = col3.number_input("ราคาขาย บ้านเดี่ยว (บาท)", value=6_000_000, step=100_000, key='sale_bd')
-        # Additional house types for assumption
         sale_price_bd3 = st.number_input("ราคาขาย บ้านเดี่ยว3ชั้น (บาท)", value=9_000_000, step=100_000, key='sale_bd3')
         sale_price_comm = st.number_input("ราคาขาย อาคารพาณิชย์ (บาท)", value=5_000_000, step=100_000, key='sale_comm')
 
@@ -406,7 +481,6 @@ if df is not None:
         cost_th = col4.number_input("ต้นทุน ทาวน์โฮม (บาท)", value=1_500_000, step=50_000, key='cost_th')
         cost_ba = col5.number_input("ต้นทุน บ้านแฝด (บาท)", value=2_500_000, step=50_000, key='cost_ba')
         cost_bd = col6.number_input("ต้นทุน บ้านเดี่ยว (บาท)", value=3_500_000, step=50_000, key='cost_bd')
-        # Additional house types for assumption
         cost_bd3 = st.number_input("ต้นทุน บ้านเดี่ยว3ชั้น (บาท)", value=5_500_000, step=50_000, key='cost_bd3')
         cost_comm = st.number_input("ต้นทุน อาคารพาณิชย์ (บาท)", value=3_000_000, step=50_000, key='cost_comm')
 
@@ -421,15 +495,16 @@ if df is not None:
     input_col1, input_col2 = st.columns(2)
     project_area_input = input_col1.number_input("พื้นที่โครงการ (ตร.วา)",
                                                  min_value=float(X['พื้นที่โครงการ(ตรม)'].min()),
-                                                 max_value=float(X['พื้นที่โครงการ(ตรม)'].max()),
+                                                 max_value=float(X['พื้นที่โครงการ(ตร.ม)'].max()), # Corrected column name
                                                  value=float(X['พื้นที่โครงการ(ตรม)'].mean()),
                                                  step=500.0)
 
     land_shape_options = X['รูปร่างที่ดิน'].dropna().unique().tolist()
     land_shape_input = input_col2.selectbox("รูปร่างที่ดิน", land_shape_options)
 
-    grade_options = X['เกรดโครงการ'].dropna().unique().tolist()
-    grade_input = st.selectbox("เกรดโครงการ", grade_options)
+    # UPDATED: Project Grade selection now uses mapped categories
+    grade_options_mapped = sorted(list(mapped_grade_to_original_grades.keys())) # Sort for consistent order
+    grade_input = st.selectbox("เกรดโครงการ (สูง/กลาง/ต่ำ)", grade_options_mapped)
 
     province_options = X['จังหวัด'].dropna().unique().tolist()
     province_input = st.selectbox("จังหวัด", province_options)
@@ -448,7 +523,7 @@ if df is not None:
                     project_area_input, land_shape_input, grade_input, province_input,
                     model, house_types, targets, sale_price_per_unit, construction_cost_per_unit,
                     land_cost_per_sqwah, other_development_cost_ratio, unit_standard_area_sqwah, df_original,
-                    excluded_house_types_input # Pass the excluded types
+                    excluded_house_types_input, mapped_grade_to_original_grades # Pass the mapped_grade_to_original_grades
                 )
             
             st.subheader("🔍 ผลการทำนายจาก ML")
@@ -466,12 +541,10 @@ if df is not None:
                     result_ml['พื้นที่ถนน (ตร.วา)']
                 ]
                 area_labels = ['พื้นที่ขาย', 'พื้นที่สาธารณะ', 'พื้นที่สวน', 'พื้นที่ถนน']
-                plot_area_pie_chart(area_data, area_labels)
-
+                plot_area_pie_chart(area_data, area_labels, grade_input) # Pass grade_input
             with chart_col2:
                 st.write("#### จำนวนแปลงบ้าน")
-                # UPDATED: Call the new, more dynamic bar chart function
-                plot_house_bar_chart(result_ml, house_types)
+                plot_house_bar_chart(result_ml, house_types, grade_input) # Pass grade_input
             
             st.subheader("📝 สร้าง Executive Summary อัตโนมัติ")
             if st.button("สร้างสรุปสำหรับผู้บริหารด้วย AI"):
@@ -507,16 +580,15 @@ if df is not None:
         if model is not None:
             with st.spinner('กำลังวิเคราะห์ทางเลือกทั้งหมด...'):
                 best_grade_results = []
-                available_grades_for_analysis = df['เกรดโครงการ'].dropna().unique().tolist()
+                # Use the mapped grade options for analysis
+                available_grades_for_analysis = sorted(list(mapped_grade_to_original_grades.keys())) # Sort for consistent order
                 for grade_option in available_grades_for_analysis:
-                    # For best option analysis, we don't apply explicit exclusion by default
-                    # as we want to see the full potential of each grade.
-                    # If the user wants to exclude for this analysis, they'd need a separate control.
                     predicted_output = predict_and_analyze(
                         analysis_project_area, analysis_land_shape, grade_option, analysis_province,
                         model, house_types, targets, sale_price_per_unit, construction_cost_per_unit,
-                        land_cost_per_sqwah, other_development_cost_ratio, unit_standard_area_sqwah, df_original,
-                        [] # No explicit exclusion for best option analysis
+                        land_cost_per_sqwah, other_development_ratio, unit_standard_area_sqwah, df_original,
+                        [], # No explicit exclusion for best option analysis
+                        mapped_grade_to_original_grades # Pass the mapped_grade_to_original_grades
                     )
                     predicted_output['เกรดโครงการ'] = grade_option
                     best_grade_results.append(predicted_output)
