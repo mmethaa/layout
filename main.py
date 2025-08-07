@@ -23,7 +23,8 @@ GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini
 MODEL_PATH = "random_forest_model.joblib"
 # คำเตือน: Streamlit Cloud ไม่สามารถใช้ไฟล์ที่เก็บในเครื่องได้ ถ้าใช้งานบนคลาวด์อาจต้องปรับวิธี
 # การเก็บไฟล์หรือใช้ Streamlit's caching mechanisms แทน.
-THAI_FONT_FILE = "Sarabun-Regular.ttf" # A font file is needed for consistent display
+# IMPORTANT: You MUST upload this font file (Sarabun-Regular.ttf) alongside your main.py
+THAI_FONT_FILE = "Sarabun-Regular.ttf" 
 
 # --- Project Grade Mapping ---
 # IMPORTANT: Adjust this mapping based on your actual 'เกรดโครงการ' values in layoutdata.xlsx
@@ -102,7 +103,6 @@ def call_gemini_api(prompt):
         st.error(f"เกิดข้อผิดพลาดที่ไม่คาดคิด: {e}")
         return "ไม่สามารถสร้างสรุปได้ เนื่องจากเกิดข้อผิดพลาดที่ไม่คาดคิด"
 
-# UPDATED: plot_area_pie_chart now accepts grade_input for color selection
 def plot_area_pie_chart(data, labels, grade_input):
     """
     Generates and displays a pie chart for area breakdown, with colors based on grade.
@@ -113,7 +113,6 @@ def plot_area_pie_chart(data, labels, grade_input):
     ax.axis('equal') # Equal aspect ratio ensures that pie is drawn as a circle.
     st.pyplot(fig)
 
-# UPDATED: plot_house_bar_chart now accepts grade_input for color selection
 def plot_house_bar_chart(result_ml, house_types_list, grade_input):
     """
     Generates and displays a bar chart for house types with non-zero counts, with colors based on grade.
@@ -141,7 +140,6 @@ def plot_house_bar_chart(result_ml, house_types_list, grade_input):
     else:
         st.warning("ไม่มีข้อมูลจำนวนแปลงบ้านที่ทำนายได้")
 
-# This function checks and corrects house type predictions based on historical data.
 def get_historically_present_house_types(df_original, mapped_grade_input, all_house_types, mapped_to_original_grades_dict):
     """
     Checks the original dataframe to see which house types are actually present for a given mapped grade.
@@ -161,7 +159,6 @@ def get_historically_present_house_types(df_original, mapped_grade_input, all_ho
             present_house_types.add(h_type)
     return present_house_types
 
-# Corrected predict_and_analyze function
 def predict_and_analyze(project_area, land_shape, grade, province, ml_model, house_types_list, target_cols,
                         sale_prices, construct_costs, land_cost_sqwah, other_dev_ratio,
                         unit_standard_area_sqwah_dict, df_original, excluded_house_types, mapped_to_original_grades_dict):
@@ -262,7 +259,6 @@ st.title("📐 Smart Layout Predictor (ML Powered)")
 st.markdown("โปรดอัปโหลดไฟล์ข้อมูลโครงการของคุณ (layoutdata.xlsx - Sheet1.csv) เพื่อเริ่มต้นการทำนายและวิเคราะห์")
 
 st.markdown("---")
-# UPDATED: Improved Thai font handling
 st.info("💡 App is attempting to set a Thai font for charts. It will first try to use an embedded font file, then fall back to system fonts.")
 try:
     # First, try to use a specific font file included with the app
@@ -495,7 +491,7 @@ if df is not None:
     input_col1, input_col2 = st.columns(2)
     project_area_input = input_col1.number_input("พื้นที่โครงการ (ตร.วา)",
                                                  min_value=float(X['พื้นที่โครงการ(ตรม)'].min()),
-                                                 max_value=float(X['พื้นที่โครงการ(ตร.ม)'].max()), # Corrected column name
+                                                 max_value=float(X['พื้นที่โครงการ(ตรม)'].max()),
                                                  value=float(X['พื้นที่โครงการ(ตรม)'].mean()),
                                                  step=500.0)
 
@@ -586,7 +582,7 @@ if df is not None:
                     predicted_output = predict_and_analyze(
                         analysis_project_area, analysis_land_shape, grade_option, analysis_province,
                         model, house_types, targets, sale_price_per_unit, construction_cost_per_unit,
-                        land_cost_per_sqwah, other_development_ratio, unit_standard_area_sqwah, df_original,
+                        land_cost_per_sqwah, other_development_cost_ratio, unit_standard_area_sqwah, df_original,
                         [], # No explicit exclusion for best option analysis
                         mapped_grade_to_original_grades # Pass the mapped_grade_to_original_grades
                     )
